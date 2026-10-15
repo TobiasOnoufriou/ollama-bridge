@@ -20,6 +20,7 @@ export function effectiveConfig() {
     bridgeModel: process.env.OLLAMA_BRIDGE_MODEL || cfg.bridgeModel,
     reasoningModel: process.env.OLLAMA_BRIDGE_REASONING_MODEL || cfg.reasoningModel,
     claudeLocalVariant: process.env.CLAUDE_LOCAL_MODEL || cfg.claudeLocalVariant,
+    agentModel: process.env.OLLAMA_BRIDGE_AGENT_MODEL || cfg.agentModel || cfg.claudeLocalModel,
   };
 }
 

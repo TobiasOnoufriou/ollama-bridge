@@ -3,6 +3,7 @@
 import readline from "node:readline";
 import { chat, listModels, loadLog, clearLog, logPath, projectDir, DEFAULT_MODEL, REASONING_MODEL } from "./lib.mjs";
 import { planAndLog } from "./planner.mjs";
+import { runAgentAndLog, AGENT_MODEL } from "./agent.mjs";
 
 // These descriptions load into every Claude Code session on the machine, so keep them short.
 const TOOLS = [
@@ -20,6 +21,23 @@ const TOOLS = [
         plan: { type: "boolean", description: "Reply with a step-by-step plan instead of doing the task." },
       },
       required: ["prompt"],
+    },
+  },
+  {
+    name: "local_task",
+    description:
+      `Hand a well-scoped, mechanical coding task to a local agent (${AGENT_MODEL}) that searches, reads and edits ` +
+      `files in this project itself. Describe the task and name files; don't paste code. Returns a summary and ` +
+      `diffstat; check with git diff. Slow; not for judgement-heavy or cross-cutting work.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "What to change and what done looks like." },
+        files: { type: "array", items: { type: "string" }, description: "Paths likely involved." },
+        model: { type: "string" },
+        max_steps: { type: "number", description: "Tool-call rounds (default 30)." },
+      },
+      required: ["task"],
     },
   },
   {
@@ -72,6 +90,16 @@ async function callTool(name, args = {}) {
         plan: args.plan === true,
       });
       return `[${model}]\n${reply}`;
+    }
+    case "local_task": {
+      if (!String(args.task || "").trim()) throw new Error("task is required");
+      const { report } = await runAgentAndLog({
+        task: String(args.task || ""),
+        files: Array.isArray(args.files) ? args.files.map(String) : [],
+        model: args.model || undefined,
+        maxSteps: Number(args.max_steps) || undefined,
+      });
+      return report;
     }
     case "local_history": {
       const msgs = loadLog().messages.slice(-Math.min(Math.max(1, Number(args.last) || 10), 50));

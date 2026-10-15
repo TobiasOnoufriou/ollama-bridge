@@ -14,6 +14,7 @@ import { usage } from "./usage.mjs";
 import { projectContext } from "./context.mjs";
 import { planAndLog } from "./planner.mjs";
 import { implementAndReview } from "./review.mjs";
+import { runAgentAndLog } from "./agent.mjs";
 import { contextSize, transcriptFor, recentTranscripts, shouldHint, savings } from "./session-hint.mjs";
 import { handoff, copyToClipboard } from "./handoff.mjs";
 import { repoFor, listIssues, getIssue, issueMarkdown, issueBranch, issueSession } from "./issues.mjs";
@@ -239,6 +240,23 @@ async function route(req, res, url) {
       } finally {
         progress.delete(id);
       }
+    }
+    // Local agent: the local model reads and edits the project's files itself (agent.mjs). Stop keeps the edits made
+    // so far and still logs the report, so this returns normally with stopped set.
+    if (pathname === "/api/task") {
+      if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
+      const dir = projectParam(body.project);
+      const sub = subParam(body.sub);
+      const id = String(body.progressId || "").slice(0, 64);
+      const out = await cancellable(body.runId, `${dir}|${sub}`, () => runAgentAndLog({
+        dir,
+        sub,
+        from: "human",
+        task: body.prompt,
+        model: body.model || undefined,
+        onProgress: (text) => id && progress.set(id, { text, at: Date.now() }),
+      })).finally(() => progress.delete(id));
+      return send(res, 200, { model: out.model, steps: out.steps, ms: out.ms, stopped: out.stopped, changes: out.changes.length, errors: out.errors.length });
     }
     if (pathname === "/api/route") {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });

@@ -41,6 +41,7 @@ ${bold("Usage:")} ollama-bridge <command> [options]
   ${cyan("ui")} [--port N] [--no-open]   Open the web UI (projects, shared conversations, chat, status)
   ${cyan("ask")} "<prompt>"              Smart prompt: routes to the local model or Claude Code, then answers
                               --local / --claude to force a side, --model, --effort, --fast, --plan
+  ${cyan("task")} "<what to change>"     Local agent edits this folder's files itself (--model name)
   ${cyan("chat")} [model]                Chat with a local model in this folder's shared log
   ${cyan("claude")} [claude args]        Run Claude Code on the local model (same as claude-local)
   ${cyan("status")}                      Check that everything is installed and wired up
@@ -124,6 +125,25 @@ switch (cmd) {
         if (out.changes.length) console.log(dim(`\nChanged: ${out.changes.map((c) => `${c.file} (+${c.added} -${c.removed})`).join(", ")}`));
         if (out.isError) process.exit(1);
       }
+    } catch (err) {
+      console.error(red(err.message));
+      process.exit(1);
+    }
+    break;
+  }
+
+  case "task": {
+    const i = args.indexOf("--model");
+    const task = args.filter((a, j) => !a.startsWith("--") && args[j - 1] !== "--model").join(" ").trim();
+    if (!task) {
+      console.error(red('Usage: ollama-bridge task "<what to change>" [--model name]'));
+      process.exit(1);
+    }
+    const { runAgentAndLog } = await import("./agent.mjs");
+    try {
+      const out = await runAgentAndLog({ from: "human", task, model: i !== -1 ? args[i + 1] : undefined, onProgress: (t) => console.log(dim(`  … ${t}`)) });
+      console.log(`\n${out.report}`);
+      if (out.errors.length) process.exit(1);
     } catch (err) {
       console.error(red(err.message));
       process.exit(1);

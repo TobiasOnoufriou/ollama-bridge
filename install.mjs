@@ -321,7 +321,9 @@ function claudeMdBlock(cfg) {
   return `${MARK_START}
 ## Local models (ollama-bridge)
 Offload simple, self-contained tasks to \`ask_local\` to save usage (\`model: "${cfg.reasoningModel}"\` for a second
-opinion). Keep multi-file, tool-using or judgement-heavy work yourself.
+opinion). For mechanical, well-scoped edits (renames, small functions, test drafts), \`local_task\` lets a local
+agent edit the files itself: name the files, don't paste code, then check \`git diff\`. Keep cross-cutting or
+judgement-heavy work yourself.
 ${MARK_END}`;
 }
 

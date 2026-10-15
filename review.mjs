@@ -78,7 +78,7 @@ function unusedFunctions(names, after) {
 }
 
 let pythonOk = null;
-function syntaxErrors(dir, changes) {
+export function syntaxErrors(dir, changes) {
   const errors = [];
   for (const c of changes.filter((c) => c.status !== "deleted")) {
     const abs = path.join(dir, c.rel);

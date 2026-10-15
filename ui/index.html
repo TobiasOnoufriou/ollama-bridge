@@ -474,6 +474,7 @@
         <button type="button" data-target="local" title="Always use the local model selected at the top">Local</button>
         <button type="button" data-target="smart" title="Smart prompt: picks the local model for simple, self-contained requests and Claude Code for anything that needs your project's files or careful work">Smart</button>
         <button type="button" data-target="claude" title="Always use Claude Code (model and start mode from the settings above)">Claude</button>
+        <button type="button" data-target="agent" title="Local agent: the local agent model searches, reads and edits this project's files itself, then reports what it changed. For mechanical, well-scoped edits">Agent</button>
       </div>
       <label class="plan-toggle" title="Plan mode: the reply is a step-by-step plan instead of doing the task">
         <input type="checkbox" id="planMode"><span>Plan</span></label>
@@ -529,7 +530,7 @@
   <div class="dlg-body">
     <h3>In a message</h3>
     <table class="keys">
-      <tr><td><code>@claude</code> <code>@local</code> <code>@smart</code></td><td>send just this message there, whatever the switch says</td></tr>
+      <tr><td><code>@claude</code> <code>@local</code> <code>@smart</code> <code>@agent</code></td><td>send just this message there, whatever the switch says</td></tr>
       <tr><td><code>@reason</code></td><td>ask the reasoning model (DeepSeek R1 unless you changed it) for this message</td></tr>
       <tr><td><code>@qwen3.6</code>, <code>@deepseek</code>…</td><td>use any installed model by name (the start of the name is enough)</td></tr>
       <tr><td><code>/plan</code></td><td>plan mode for this message only; combine them: <code>@claude /plan add login</code></td></tr>
@@ -540,7 +541,7 @@
     <h3>Keys</h3>
     <table class="keys">
       <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>/</kbd></td><td>jump to the message box</td></tr>
-      <tr><td><kbd>Alt</kbd>+<kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>send to Local / Smart / Claude</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></td><td>send to Local / Smart / Claude / Agent</td></tr>
       <tr><td><kbd>Alt</kbd>+<kbd>P</kbd></td><td>plan mode on/off</td></tr>
       <tr><td><kbd>Alt</kbd>+<kbd>S</kbd></td><td>settings</td></tr>
       <tr><td><kbd>Alt</kbd>+<kbd>U</kbd></td><td>usage</td></tr>
@@ -739,7 +740,7 @@ function msgHtml(m, i) {
   const name = kind === "claude" ? "Claude" : kind === "human" ? "You" : "Local model";
   const letter = kind === "claude" ? "C" : kind === "human" ? "Y" : "L";
   const time = m.ts ? `<time>${new Date(m.ts).toLocaleString()}</time>` : "";
-  const model = (m.model ? `<span class="model">${esc(m.model)}</span>` : "") + (m.mode === "plan" ? '<span class="badge-plan">Plan</span>' : m.mode === "review" ? '<span class="badge-plan">Review</span>' : "");
+  const model = (m.model ? `<span class="model">${esc(m.model)}</span>` : "") + (m.mode === "plan" ? '<span class="badge-plan">Plan</span>' : m.mode === "review" ? '<span class="badge-plan">Review</span>' : m.mode === "task" ? '<span class="badge-plan">Agent</span>' : "");
   const route = m.route ? `<span class="route-chip to-${m.route.to}" title="${esc(m.route.by === "you" ? "Chosen by you" : m.route.by === "rules" ? "Decided by a rule" : "Decided by the local classifier")}">${m.route.by === "you" ? "→" : "Smart →"} <b>${m.route.to === "claude" ? "Claude" : "Local"}</b> · ${esc(m.route.reason)}</span>` : "";
   const acts = m.pending ? "" : `<div class="msg-actions">
       <button data-act="copy" title="Copy this message">Copy</button>
@@ -1310,24 +1311,26 @@ async function loadStatus() {
 }
 
 // ---- actions
-// Send to: "local" (the model picked at the top), "claude" (Claude Code) or "smart" (the router decides).
+// Send to: "local" (the model picked at the top), "claude" (Claude Code), "smart" (the router decides) or "agent"
+// (the local agent edits files itself, with the agentModel from config).
 const getTarget = () => document.querySelector(".target .on")?.dataset.target || "smart";
 function setTarget(t) {
   for (const b of document.querySelectorAll(".target button")) b.classList.toggle("on", b.dataset.target === t);
   store.set("target", t);
-  $("model").title = t === "claude" ? "Not used when sending to Claude" : "Local model to reply";
-  $("input").placeholder = $("planMode").checked ? "Describe what you want planned…"
+  $("model").title = t === "claude" ? "Not used when sending to Claude" : t === "agent" ? `Not used by the agent (it runs ${state.config?.agentModel || "agentModel"})` : "Local model to reply";
+  $("input").placeholder = t === "agent" ? "Describe a change for the local agent to make in this project's files…"
+    : $("planMode").checked ? "Describe what you want planned…"
     : t === "claude" ? "Ask Claude Code about this project…" : t === "smart" ? "Ask anything; Smart picks local or Claude…" : "Message the local model…";
 }
 
-// Hidden trick: start a message with @claude, @local, @smart, @reason (the reasoning model), @<model name>
+// Hidden trick: start a message with @claude, @local, @smart, @agent, @reason (the reasoning model), @<model name>
 // and/or /plan to override the switch and model for that one message.
 function parsePrefixes(raw) {
   let text = raw, target = null, model = null, plan = false, tag = null, m;
   while ((m = text.match(/^\s*(@[\w.:\-\/]+|\/plan)\b\s*/i))) {
     const tok = m[1].toLowerCase();
     if (tok === "/plan") plan = true;
-    else if (tok === "@claude" || tok === "@local" || tok === "@smart") { target = tok.slice(1); tag = m[1]; }
+    else if (tok === "@claude" || tok === "@local" || tok === "@smart" || tok === "@agent") { target = tok.slice(1); tag = m[1]; }
     else if (tok === "@reason" || tok === "@reasoning" || tok === "@deepseek") { target = "local"; model = state.config?.reasoningModel || "deepseek-r1:14b"; tag = m[1]; }
     else {
       const want = m[1].slice(1).toLowerCase();
@@ -1377,7 +1380,9 @@ async function sendMessage(override = {}) {
   if (!text) return;
   const target = override.target || p.target || getTarget();
   const localModel = override.model || p.model || $("model").value;
-  const plan = override.plan ?? (p.plan || $("planMode").checked);
+  const agent = target === "agent";
+  // The agent edits files rather than planning, so Plan doesn't apply to it.
+  const plan = !agent && (override.plan ?? (p.plan || $("planMode").checked));
   const useHistory = $("useHistory").checked;
   const sub = state.sub;
   setRunning(true);
@@ -1392,23 +1397,24 @@ async function sendMessage(override = {}) {
   // Step-by-step plans read the project themselves, one small question at a time, then check the result.
   const stepwise = plan && pf !== "off" && $("planStyle").value === "steps";
   const progressId = Math.random().toString(36).slice(2);
-  if (target !== "smart" && (p.tag || override.reason)) {
+  if (agent) mine.mode = "task";
+  else if (target !== "smart" && (p.tag || override.reason)) {
     mine.route = { to: target === "claude" ? "claude" : "local", reason: p.tag ? `you typed ${p.tag}` : override.reason, by: "you" };
   }
   state.messages.push(mine);
-  const pending = { from: target === "claude" ? "claude" : "local", model: target === "local" ? localModel : "", content: "", pending: true, ...(plan ? { mode: "plan" } : {}) };
+  const pending = { from: target === "claude" ? "claude" : "local", model: target === "local" ? localModel : agent ? state.config?.agentModel || "" : "", content: "", pending: true, ...(plan ? { mode: "plan" } : agent ? { mode: "task" } : {}) };
   state.messages.push(pending);
   const localVerb = () => (stepwise ? "Planning step by step" : readProject ? (plan ? "Reading the project and planning" : "Reading the project") : plan ? "Planning" : "Thinking");
   const claudeVerb = () => (plan ? "Claude Code is planning" : "Claude Code is working");
   // Show which step a step-by-step plan is on, or what Claude Code is doing (reading, editing, ...).
   const poll = setInterval(async () => {
-    if (pending.from === "local" && !stepwise) return;
+    if (pending.from === "local" && !stepwise && !agent) return;
     try {
       const pr = await api(`/api/progress?id=${progressId}`);
-      if (pr.text) verb = pending.from === "claude" ? `${claudeVerb()}: ${pr.text}` : pr.text;
+      if (pr.text) verb = pending.from === "claude" ? `${claudeVerb()}: ${pr.text}` : agent ? `Local agent: ${pr.text}` : pr.text;
     } catch {}
   }, 1000);
-  let verb = target === "smart" ? "Routing" : target === "claude" ? claudeVerb() : localVerb();
+  let verb = target === "smart" ? "Routing" : target === "claude" ? claudeVerb() : agent ? "Local agent is working" : localVerb();
   const started = Date.now();
   const tick = () => {
     pending.content = `${verb}… ${Math.round((Date.now() - started) / 1000)}s`;
@@ -1431,7 +1437,12 @@ async function sendMessage(override = {}) {
       renderMessages(true);
       tick();
     }
-    if (route.to === "claude") {
+    if (agent) {
+      const out = await api("/api/task", { project: state.project, sub, prompt: text, runId, progressId });
+      if (out.stopped === "you stopped it") toast("Stopped. Edits the agent made so far are kept; see its report");
+      else if (out.stopped) toast(`The agent stopped early: ${out.stopped}`, true);
+      else if (out.errors) toast("The agent's edits have syntax errors; see its report", true);
+    } else if (route.to === "claude") {
       const out = await api("/api/claude", {
         project: state.project, sub, prompt: text, ...claudeOpts(),
         ...(override.mode ? { mode: override.mode } : {}), ...(override.effort ? { effort: override.effort } : {}),
@@ -1739,7 +1750,7 @@ function isTyping(e) { return /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.code === "KeyK") { e.preventDefault(); document.querySelectorAll("dialog[open]").forEach((d) => d.close()); $("input").focus(); return; }
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
-    const act = { Digit1: () => setTarget("local"), Digit2: () => setTarget("smart"), Digit3: () => setTarget("claude"),
+    const act = { Digit1: () => setTarget("local"), Digit2: () => setTarget("smart"), Digit3: () => setTarget("claude"), Digit4: () => setTarget("agent"),
       KeyP: () => $("planMode").click(), KeyS: openSettings, KeyU: openUsage, KeyN: openAdd, KeyI: openIssues }[e.code];
     if (act) { e.preventDefault(); document.querySelectorAll("dialog[open]").forEach((d) => d.close()); act(); }
     return;
@@ -1816,7 +1827,7 @@ $("closeDlg").addEventListener("click", () => $("statusDlg").close());
   if (["plans", "always", "off"].includes(store.get("projectFiles"))) $("projectFiles").value = store.get("projectFiles");
   if (["steps", "quick"].includes(store.get("planStyle"))) $("planStyle").value = store.get("planStyle");
   if (["fix", "review", "off"].includes(store.get("reviewMode"))) $("reviewMode").value = store.get("reviewMode");
-  setTarget(["local", "smart", "claude"].includes(store.get("target")) ? store.get("target") : "smart");
+  setTarget(["local", "smart", "claude", "agent"].includes(store.get("target")) ? store.get("target") : "smart");
   await loadSessions().catch(() => {});
   await Promise.all([loadHistory(true), loadModels(), loadLaunchOptions()]);
   loadStatus();

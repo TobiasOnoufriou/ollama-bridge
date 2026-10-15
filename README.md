@@ -14,9 +14,32 @@ No npm dependencies; needs Node 18+.
 | Tool | What it does |
 |---|---|
 | `ask_local` | Send a prompt to the local model (optional `model`, `use_history`) |
+| `local_task` | Hand a coding task to a local agent that reads and edits the project's files itself (see below) |
 | `local_history` | Read the shared log, including messages you sent via `local-chat` |
 | `reset_local_history` | Clear the log for the current project |
 | `list_local_models` | List installed Ollama models |
+
+### `local_task`: the local model edits files itself
+
+`ask_local` can't see your files, so Claude has to paste code in and apply the answer itself, which saves little.
+`local_task` runs a small agent loop on a local model (`agentModel`, default `qwen3.6`) with Ollama tool calling:
+it can `list_files`, `grep`, `read_file` and change files with `edit_file` (exact find-and-replace) and
+`write_file`. Claude sends only the task and file hints and gets back a short summary plus a diffstat, so the code
+never passes through Claude's context; Claude can check the result with `git diff`.
+
+- Paths are checked in code: only inside the project, never `.git`, `node_modules` or `.env*`. `list_files` and
+  `grep` skip gitignored files too.
+  There is no shell tool.
+- At most `agentMaxSteps` tool rounds (default 30) and 15 minutes; old tool output is dropped as the
+  conversation grows past `agentNumCtx`.
+- Changed `.js`/`.mjs`/`.json`/`.py` files get a syntax check, reported with the diffstat.
+- The task and the report go into the project's shared log.
+- Try it from a terminal: `ollama-bridge task "rename foo to bar in src/util.js and its callers"`, or in the web UI
+  with the **Agent** send target (<kbd>Alt</kbd>+<kbd>4</kbd>, or start a message with `@agent`). The UI shows each
+  tool call live; **Stop** keeps the edits made so far and still logs the report.
+
+Best for mechanical, well-scoped edits (renames, small functions, test drafts, doc updates). It is slow on a
+model that doesn't fit in GPU memory, and it isn't for design decisions or changes across many files.
 
 ## Setup (Windows, macOS, Linux)
 
@@ -260,7 +283,7 @@ Hover any reply to see its tokens in → out, time, and (for Claude runs) the co
 
 Press <kbd>?</kbd> (or click **Shortcuts & tricks** under the message box) for the full list.
 
-- **Per-message overrides:** start a message with `@claude`, `@local`, `@smart`, `@reason` (the reasoning
+- **Per-message overrides:** start a message with `@claude`, `@local`, `@smart`, `@agent`, `@reason` (the reasoning
   model), `@<model name>` (the start of the name is enough), and/or `/plan`, e.g. `@claude /plan add login`.
 - **Drop text files** on the message box to paste them in as code blocks; Smart then keeps the question local
   because the model can see the file.
@@ -272,8 +295,8 @@ Press <kbd>?</kbd> (or click **Shortcuts & tricks** under the message box) for t
   old one to finish stopping.
 - **Hover a message** for **Copy**, **Ask Claude instead** / **Retry locally**, and **Second opinion** (the
   reasoning model checks the answer).
-- **Keys:** <kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>/</kbd> jump to the message box; <kbd>Alt</kbd>+<kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd>
-  Local / Smart / Claude; <kbd>Alt</kbd>+<kbd>P</kbd> plan mode; <kbd>Alt</kbd>+<kbd>S</kbd> settings;
+- **Keys:** <kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>/</kbd> jump to the message box; <kbd>Alt</kbd>+<kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd>/<kbd>4</kbd>
+  Local / Smart / Claude / Agent; <kbd>Alt</kbd>+<kbd>P</kbd> plan mode; <kbd>Alt</kbd>+<kbd>S</kbd> settings;
   <kbd>Alt</kbd>+<kbd>U</kbd> usage; <kbd>Alt</kbd>+<kbd>N</kbd> add a project.
 
 ### Plan mode for the local models
@@ -379,6 +402,9 @@ Edit `config.json` (per machine, not committed) and re-run `node install.mjs` to
 | `reasoningModel` | `deepseek-r1:14b` | suggested to Claude for reasoning-heavy questions |
 | `claudeLocalModel` | `qwen3.6` | claude-local runs the `<model>-cc` variant built from it |
 | `claudeLocalCtx` | `65536` | context size of that variant |
+| `agentModel` | `qwen3.6` | `local_task` / `ollama-bridge task` (needs a model with tool calling) |
+| `agentNumCtx` | `32768` | context size for `local_task` |
+| `agentMaxSteps` | `30` | tool-call rounds per `local_task` |
 | `ollamaUrl` | `http://localhost:11434` | everything |
 | `embedModel` | `nomic-embed-text` | project-aware plans (search by meaning); the installer offers to download it |
 | `newSessionHintTokens` | `100000` | context size at which a new session is suggested; `0` turns the hint off |
@@ -391,6 +417,8 @@ Environment variables override the config:
 | `OLLAMA_BRIDGE_MODEL` | `bridgeModel` |
 | `OLLAMA_BRIDGE_REASONING_MODEL` | `reasoningModel` |
 | `OLLAMA_BRIDGE_NUM_CTX` | `bridgeNumCtx` |
+| `OLLAMA_BRIDGE_AGENT_MODEL` | `agentModel` |
+| `OLLAMA_BRIDGE_AGENT_CTX` | `agentNumCtx` |
 | `OLLAMA_BRIDGE_MAX_CHARS` | history sent per request (default `80000`) |
 | `OLLAMA_BRIDGE_SESSION` | sub-session to use instead of the project's main conversation (set by `--sub` and by terminals opened from a session tab) |
 | `OLLAMA_HOST_URL` | `ollamaUrl` |
