@@ -4,6 +4,7 @@ Connects Claude Code to local models running in [Ollama](https://ollama.com), wi
 
 - **Bridge (MCP server):** gives Claude an `ask_local` tool so it can offload simple tasks to a local model. Claude, the local model and you (via `local-chat`) all share one conversation log per project folder.
 - **`claude-local`:** runs Claude Code itself on a local model instead of Anthropic's API (offline, private, no cost; much slower and less capable).
+- **Web UI (`ollama-bridge ui`):** see every project's shared conversation (Claude, you and the models, live), chat with any installed model, clear history, and check your setup.
 
 No npm dependencies; needs Node 18+.
 
@@ -41,12 +42,26 @@ Open a new terminal afterwards so the PATH change applies.
 
 ## Usage
 
+Everything goes through one command:
+
 ```bash
-local-chat                       # chat with the default model in this folder's shared log
-local-chat deepseek-r1:14b       # ...or a specific model
-claude-local                     # Claude Code on the local model (qwen3.6-cc by default)
-claude-local -Model other-model -p "do something"
+ollama-bridge ui                 # web UI at http://127.0.0.1:4317 (opens your browser)
+ollama-bridge chat               # chat in the terminal, in this folder's shared log
+ollama-bridge chat deepseek-r1:14b
+ollama-bridge claude             # Claude Code on the local model (qwen3.6-cc by default)
+ollama-bridge status             # check everything is installed and wired up, with fixes
+ollama-bridge models             # installed models and their roles (default / reasoning / claude-local)
+ollama-bridge history 10         # last 10 messages of this folder's shared log
+ollama-bridge projects           # every project with a shared log
+ollama-bridge reset              # clear this folder's shared log
+ollama-bridge install            # re-run the installer
 ```
+
+`claude-local` and `local-chat` still work as shortcuts for `ollama-bridge claude` and `ollama-bridge chat`.
+
+The web UI only listens on `127.0.0.1`, refuses other hostnames and cross-site requests, and refreshes
+every few seconds, so messages Claude sends with `ask_local` appear on their own. Use `--port N` to pick
+another port or `--no-open` to skip opening the browser.
 
 ## Configuration
 

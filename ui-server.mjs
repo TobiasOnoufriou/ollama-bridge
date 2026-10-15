@@ -1,0 +1,127 @@
+// Local web UI for ollama-bridge: `ollama-bridge ui`. Listens on 127.0.0.1 only.
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { HERE } from "./config.mjs";
+import { chat, loadLog, saveLog, listProjects } from "./lib.mjs";
+import { checkStatus, modelsWithRoles, effectiveConfig } from "./status.mjs";
+
+const DEFAULT_PORT = 4317;
+const INDEX = path.join(HERE, "ui", "index.html");
+const startDir = path.resolve(process.cwd());
+
+function send(res, status, body, type = "application/json") {
+  res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+  res.end(type === "application/json" ? JSON.stringify(body) : body);
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (d) => {
+      data += d;
+      if (data.length > 2e6) reject(new Error("Request too large"));
+    });
+    req.on("end", () => {
+      try {
+        resolve(data ? JSON.parse(data) : {});
+      } catch {
+        reject(new Error("Invalid JSON"));
+      }
+    });
+  });
+}
+
+function projects() {
+  const list = listProjects();
+  if (!list.some((p) => path.resolve(p.project) === startDir)) {
+    list.unshift({ project: startDir, messages: 0, updated: null });
+  }
+  return list.map((p) => ({ ...p, current: path.resolve(p.project) === startDir }));
+}
+
+function projectParam(value) {
+  if (typeof value !== "string" || !path.isAbsolute(value)) throw new Error("project must be an absolute path");
+  return path.resolve(value);
+}
+
+async function route(req, res, url) {
+  const { pathname } = url;
+  if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
+    return send(res, 200, fs.readFileSync(INDEX, "utf8"), "text/html; charset=utf-8");
+  }
+  if (req.method === "GET" && pathname === "/api/config") return send(res, 200, { ...effectiveConfig(), startDir });
+  if (req.method === "GET" && pathname === "/api/projects") return send(res, 200, projects());
+  if (req.method === "GET" && pathname === "/api/history") {
+    return send(res, 200, loadLog(projectParam(url.searchParams.get("project"))));
+  }
+  if (req.method === "GET" && pathname === "/api/models") return send(res, 200, await modelsWithRoles());
+  if (req.method === "GET" && pathname === "/api/status") return send(res, 200, await checkStatus());
+
+  if (req.method === "POST") {
+    // Only same-origin JSON: a browser won't send cross-site application/json without a preflight we never answer.
+    if (!String(req.headers["content-type"]).startsWith("application/json")) return send(res, 415, { error: "JSON only" });
+    const body = await readBody(req);
+    if (pathname === "/api/chat") {
+      if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
+      const started = Date.now();
+      const out = await chat({
+        from: "human",
+        prompt: body.prompt,
+        model: body.model || undefined,
+        useHistory: body.useHistory !== false,
+        dir: projectParam(body.project),
+      });
+      return send(res, 200, { ...out, ms: Date.now() - started });
+    }
+    if (pathname === "/api/reset") {
+      const dir = projectParam(body.project);
+      saveLog({ project: dir, messages: [] }, dir);
+      return send(res, 200, { ok: true });
+    }
+  }
+  send(res, 404, { error: "Not found" });
+}
+
+function openBrowser(url) {
+  const [cmd, args] =
+    process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
+    : process.platform === "darwin" ? ["open", [url]]
+    : ["xdg-open", [url]];
+  try {
+    spawn(cmd, args, { stdio: "ignore", detached: true }).on("error", () => {}).unref();
+  } catch {}
+}
+
+function listen(server, port, tries = 10) {
+  return new Promise((resolve, reject) => {
+    server.once("error", (err) => {
+      if (err.code === "EADDRINUSE" && tries > 1) resolve(listen(server, port + 1, tries - 1));
+      else reject(err);
+    });
+    server.listen(port, "127.0.0.1", () => resolve(port));
+  });
+}
+
+export async function startUi({ port = DEFAULT_PORT, open = true } = {}) {
+  let actualPort;
+  const server = http.createServer(async (req, res) => {
+    // Reject other hostnames (DNS rebinding) and cross-site POSTs.
+    const allowed = [`127.0.0.1:${actualPort}`, `localhost:${actualPort}`];
+    if (!allowed.includes(req.headers.host)) return send(res, 403, { error: "Forbidden host" });
+    const origin = req.headers.origin;
+    if (origin && !allowed.some((h) => origin === `http://${h}`)) return send(res, 403, { error: "Forbidden origin" });
+    try {
+      await route(req, res, new URL(req.url, `http://${req.headers.host}`));
+    } catch (err) {
+      send(res, 500, { error: err.message });
+    }
+  });
+  actualPort = await listen(server, port);
+  const url = `http://127.0.0.1:${actualPort}`;
+  console.log(`ollama-bridge UI running at ${url}  (Ctrl+C to stop)`);
+  console.log(`Current project: ${startDir}`);
+  if (open) openBrowser(url);
+  return { server, url };
+}

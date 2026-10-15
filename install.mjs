@@ -254,7 +254,7 @@ async function setupPathWindows() {
     ok(`${HERE} is already on your user PATH`);
     return;
   }
-  if (!(await ask(`Add ${HERE} to your user PATH (for claude-local and local-chat)?`))) return;
+  if (!(await ask(`Add ${HERE} to your user PATH (for ollama-bridge, claude-local and local-chat)?`))) return;
   // Pass the folder through an env var so PowerShell quoting can't mangle it.
   process.env.OLLAMA_BRIDGE_DIR = HERE;
   const r = ps(
@@ -269,7 +269,7 @@ async function setupPathWindows() {
 async function setupPathUnix() {
   const bin = path.join(HOME, ".local", "bin");
   fs.mkdirSync(bin, { recursive: true });
-  for (const name of ["claude-local", "local-chat"]) {
+  for (const name of ["ollama-bridge", "claude-local", "local-chat"]) {
     const target = path.join(HERE, name);
     fs.chmodSync(target, 0o755);
     const link = path.join(bin, name);
@@ -301,7 +301,7 @@ async function setupPathUnix() {
   }
   warn(`${bin} isn't on your PATH.`);
   if (!(await ask(`Append this line to ${rc}?\n         ${line}\n      `))) {
-    info(`Add ${bin} to your PATH yourself to use claude-local and local-chat.`);
+    info(`Add ${bin} to your PATH yourself to use ollama-bridge, claude-local and local-chat.`);
     return;
   }
   fs.mkdirSync(path.dirname(rc), { recursive: true });
@@ -310,7 +310,7 @@ async function setupPathUnix() {
 }
 
 async function setupPath() {
-  step("Putting claude-local and local-chat on PATH");
+  step("Putting ollama-bridge, claude-local and local-chat on PATH");
   if (IS_WIN) await setupPathWindows();
   else await setupPathUnix();
 }
@@ -356,6 +356,8 @@ try {
   await setupPath();
   setupClaudeMd(cfg);
   console.log(`\n${bold(green("Done."))} Open a new terminal, then try:`);
+  info("ollama-bridge ui  (web UI: shared conversations, chat, setup status)");
+  info("ollama-bridge     (list every command)");
   info("claude            (the bridge's ask_local tool is available in every project)");
   info("local-chat        (chat with the local model in this folder's shared log)");
   info(`claude-local      (Claude Code itself on ${cfg.claudeLocalVariant})`);

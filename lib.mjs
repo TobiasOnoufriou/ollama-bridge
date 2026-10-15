@@ -55,8 +55,27 @@ function toOllamaMessages(entries) {
   return out;
 }
 
-export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true }) {
-  const dir = projectDir();
+// Every project that has a shared log, most recently active first.
+export function listProjects() {
+  const logs = path.join(HERE, "logs");
+  if (!fs.existsSync(logs)) return [];
+  return fs
+    .readdirSync(logs)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => {
+      try {
+        const log = JSON.parse(fs.readFileSync(path.join(logs, f), "utf8"));
+        const last = log.messages.at(-1);
+        return { project: log.project, messages: log.messages.length, updated: last?.ts || null };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+}
+
+export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true, dir = projectDir() }) {
   const log = loadLog(dir);
   const entry = { from, content: prompt, ts: new Date().toISOString() };
   const history = useHistory ? [...log.messages, entry] : [entry];
@@ -76,8 +95,10 @@ export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHis
   // Thinking models may inline their reasoning; keep only the answer.
   const reply = (data.message?.content || "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
-  log.messages.push(entry, { from: "local", model, content: reply, ts: new Date().toISOString() });
-  saveLog(log, dir);
+  // Re-read before saving: Claude, local-chat and the web UI may all have written while the model was thinking.
+  const fresh = loadLog(dir);
+  fresh.messages.push(entry, { from: "local", model, content: reply, ts: new Date().toISOString() });
+  saveLog(fresh, dir);
   return { reply, model };
 }
 

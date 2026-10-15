@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ollama-bridge</title>
+<style>
+  :root {
+    --bg: #f6f6f3;
+    --panel: #ffffff;
+    --sidebar: #efefeb;
+    --border: #dcdcd6;
+    --text: #1d1d1b;
+    --muted: #6b6b66;
+    --accent: #3b5bdb;
+    --accent-soft: #e7ecfd;
+    --claude: #b4532a;
+    --claude-soft: #fbece4;
+    --you: #3b5bdb;
+    --you-soft: #e9eefc;
+    --local: #2b8a3e;
+    --local-soft: #e6f4e9;
+    --ok: #2b8a3e;
+    --warn: #c77700;
+    --bad: #c92a2a;
+    --code-bg: #f1f1ed;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .06);
+    --radius: 10px;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615;
+      --panel: #1f1f1d;
+      --sidebar: #1a1a19;
+      --border: #33332f;
+      --text: #ecece8;
+      --muted: #9a9a93;
+      --accent: #7c9bff;
+      --accent-soft: #24304f;
+      --claude: #f08c5a;
+      --claude-soft: #3a261b;
+      --you: #7c9bff;
+      --you-soft: #222c47;
+      --local: #69c27d;
+      --local-soft: #1d3324;
+      --ok: #69c27d;
+      --warn: #f2b04b;
+      --bad: #ff7b7b;
+      --code-bg: #141413;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    overflow: hidden;
+  }
+  button, select, textarea, input { font: inherit; color: inherit; }
+  button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+  button.ghost:hover { color: var(--text); border-color: var(--border); }
+
+  /* Sidebar */
+  aside {
+    background: var(--sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .brand { padding: 16px 16px 8px; font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .brand .logo { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--claude), var(--local)); }
+  .section-label { padding: 12px 16px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  #projects { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+  .project {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 1px solid transparent;
+    background: transparent;
+    padding: 8px 10px;
+    margin-bottom: 2px;
+  }
+  .project:hover { background: var(--panel); border-color: var(--border); }
+  .project.active { background: var(--panel); border-color: var(--border); box-shadow: var(--shadow); }
+  .project .name { font-weight: 550; display: flex; align-items: center; gap: 6px; }
+  .project .meta { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tag { font-size: 10px; padding: 1px 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .status-btn { margin: 8px; display: flex; align-items: center; gap: 8px; justify-content: flex-start; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); }
+  .dot.bad { background: var(--warn); }
+
+  /* Main */
+  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    flex-wrap: wrap;
+  }
+  header .title { flex: 1; min-width: 160px; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .path { font-size: 12px; color: var(--muted); font-family: var(--mono); word-break: break-all; }
+  .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  select { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; max-width: 260px; }
+  label.toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
+
+  #messages { flex: 1; overflow-y: auto; padding: 20px; }
+  .inner { max-width: 860px; margin: 0 auto; }
+  .msg { display: flex; gap: 12px; margin-bottom: 18px; }
+  .avatar {
+    flex: none; width: 32px; height: 32px; border-radius: 8px;
+    display: grid; place-items: center; font-weight: 700; font-size: 13px;
+  }
+  .msg.claude .avatar { background: var(--claude-soft); color: var(--claude); }
+  .msg.human .avatar { background: var(--you-soft); color: var(--you); }
+  .msg.local .avatar { background: var(--local-soft); color: var(--local); }
+  .bubble { min-width: 0; flex: 1; }
+  .who { font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .msg.claude .who .n { color: var(--claude); }
+  .msg.human .who .n { color: var(--you); }
+  .msg.local .who .n { color: var(--local); }
+  .who time, .who .model { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .content { overflow-wrap: anywhere; }
+  .content p { margin: 4px 0 8px; }
+  .content ul, .content ol { margin: 4px 0 8px; padding-left: 22px; }
+  .content code { font-family: var(--mono); font-size: 12.5px; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  .content h3 { font-size: 14px; margin: 12px 0 4px; }
+  .codeblock { position: relative; margin: 8px 0; }
+  .codeblock pre {
+    margin: 0; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.45;
+  }
+  .codeblock pre code { background: none; padding: 0; }
+  .codeblock .copy { position: absolute; top: 6px; right: 6px; font-size: 11px; padding: 2px 8px; opacity: .8; }
+  .pending .content { color: var(--muted); font-style: italic; }
+  .empty { text-align: center; color: var(--muted); margin-top: 18vh; }
+  .empty h2 { color: var(--text); font-size: 18px; margin-bottom: 6px; }
+  .error { color: var(--bad); }
+
+  .composer { border-top: 1px solid var(--border); background: var(--panel); padding: 12px 20px 16px; }
+  .composer .inner { display: flex; gap: 10px; align-items: flex-end; }
+  textarea {
+    flex: 1; resize: none; min-height: 44px; max-height: 220px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+  .hint { font-size: 12px; color: var(--muted); max-width: 860px; margin: 6px auto 0; }
+
+  /* Status dialog */
+  dialog {
+    border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text);
+    width: min(640px, calc(100vw - 32px)); padding: 0;
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, .35); }
+  .dlg-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .dlg-head h2 { margin: 0; font-size: 16px; }
+  .dlg-body { padding: 8px 18px 18px; max-height: 70vh; overflow-y: auto; }
+  .check { display: grid; grid-template-columns: 20px 1fr; gap: 4px 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .check:last-child { border-bottom: none; }
+  .check .icon { font-weight: 700; }
+  .check .icon.ok { color: var(--ok); }
+  .check .icon.bad { color: var(--warn); }
+  .check .detail { color: var(--muted); font-size: 13px; }
+  .check .fix { grid-column: 2; font-family: var(--mono); font-size: 12px; background: var(--code-bg); padding: 4px 8px; border-radius: 6px; }
+  .cfg { margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .cfg code { font-family: var(--mono); color: var(--text); }
+
+  /* Narrow screens: sidebar becomes a top strip */
+  @media (max-width: 760px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    aside { border-right: none; border-bottom: 1px solid var(--border); max-height: 34vh; }
+    .brand { padding: 10px 16px 4px; }
+    #messages, header, .composer { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand"><span class="logo"></span>ollama-bridge</div>
+  <div class="section-label">Projects</div>
+  <div id="projects"></div>
+  <button class="status-btn" id="statusBtn"><span class="dot" id="statusDot"></span><span id="statusText">Checking setup…</span></button>
+</aside>
+
+<main>
+  <header>
+    <div class="title">
+      <h1 id="projName">…</h1>
+      <div class="path" id="projPath"></div>
+    </div>
+    <div class="controls">
+      <select id="model" title="Model to reply"></select>
+      <label class="toggle" title="Send the shared conversation so the model remembers it"><input type="checkbox" id="useHistory" checked> Shared history</label>
+      <button class="ghost" id="clearBtn" title="Clear this project's shared conversation">Clear</button>
+    </div>
+  </header>
+
+  <div id="messages"><div class="inner" id="list"></div></div>
+
+  <div class="composer">
+    <div class="inner">
+      <textarea id="input" rows="1" placeholder="Message the local model…"></textarea>
+      <button class="primary" id="sendBtn">Send</button>
+    </div>
+    <div class="hint">Enter to send, Shift+Enter for a new line. Claude sees this conversation through <code>local_history</code>.</div>
+  </div>
+</main>
+
+<dialog id="statusDlg">
+  <div class="dlg-head"><h2>Setup status</h2><button class="ghost" id="closeDlg">Close</button></div>
+  <div class="dlg-body" id="statusBody"></div>
+</dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { projects: [], project: null, config: null, messages: [], sending: false, lastCount: -1 };
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+async function api(path, body) {
+  const res = await fetch(path, body
+    ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+    : undefined);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// ---- tiny markdown renderer (escape first, then fenced code, inline code, bold, headings, lists)
+const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function inline(s) {
+  return s
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+}
+function renderText(text) {
+  const out = [];
+  for (const block of text.split(/\n{2,}/)) {
+    const lines = block.split("\n");
+    if (lines.every((l) => /^\s*([-*]|\d+\.)\s+/.test(l))) {
+      const ordered = /^\s*\d+\./.test(lines[0]);
+      const items = lines.map((l) => `<li>${inline(l.replace(/^\s*([-*]|\d+\.)\s+/, ""))}</li>`).join("");
+      out.push(ordered ? `<ol>${items}</ol>` : `<ul>${items}</ul>`);
+    } else if (/^#{1,6}\s/.test(lines[0]) && lines.length === 1) {
+      out.push(`<h3>${inline(lines[0].replace(/^#+\s/, ""))}</h3>`);
+    } else if (block.trim()) {
+      out.push(`<p>${lines.map(inline).join("<br>")}</p>`);
+    }
+  }
+  return out.join("");
+}
+function renderMarkdown(src) {
+  const parts = esc(src).split(/```[^\n]*\n([\s\S]*?)```/g);
+  return parts.map((p, i) => i % 2
+    ? `<div class="codeblock"><button class="copy">Copy</button><pre><code>${p.replace(/\n$/, "")}</code></pre></div>`
+    : renderText(p)).join("");
+}
+
+// ---- rendering
+const basename = (p) => p.split(/[\\/]/).filter(Boolean).pop() || p;
+function relTime(ts) {
+  if (!ts) return "no messages yet";
+  const s = (Date.now() - new Date(ts)) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+function renderProjects() {
+  $("projects").innerHTML = state.projects.map((p, i) => `
+    <button class="project ${p.project === state.project ? "active" : ""}" data-i="${i}" title="${esc(p.project)}">
+      <div class="name">${esc(basename(p.project))}${p.current ? '<span class="tag">here</span>' : ""}</div>
+      <div class="meta">${p.messages} message${p.messages === 1 ? "" : "s"} · ${relTime(p.updated)}</div>
+    </button>`).join("");
+}
+
+function msgHtml(m) {
+  const kind = m.from === "claude" ? "claude" : m.from === "human" ? "human" : "local";
+  const name = kind === "claude" ? "Claude" : kind === "human" ? "You" : "Local model";
+  const letter = kind === "claude" ? "C" : kind === "human" ? "Y" : "L";
+  const time = m.ts ? `<time>${new Date(m.ts).toLocaleString()}</time>` : "";
+  const model = m.model ? `<span class="model">${esc(m.model)}</span>` : "";
+  return `<div class="msg ${kind} ${m.pending ? "pending" : ""}">
+    <div class="avatar">${letter}</div>
+    <div class="bubble"><div class="who"><span class="n">${name}</span>${model}${time}</div>
+    <div class="content">${m.pending ? esc(m.content) : renderMarkdown(m.content)}</div></div></div>`;
+}
+
+function renderMessages(scroll) {
+  const box = $("messages");
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  if (!state.messages.length) {
+    $("list").innerHTML = `<div class="empty"><h2>No conversation yet</h2>
+      Send a message below, or ask Claude to use <code>ask_local</code> in this project.<br>
+      Everything here is shared between you, Claude and your local models.</div>`;
+    return;
+  }
+  $("list").innerHTML = state.messages.map(msgHtml).join("");
+  if (scroll || nearBottom) box.scrollTop = box.scrollHeight;
+}
+
+function renderHeader() {
+  $("projName").textContent = state.project ? basename(state.project) : "No project";
+  $("projPath").textContent = state.project || "";
+}
+
+// ---- data loading
+async function loadProjects() {
+  state.projects = await api("/api/projects");
+  if (!state.project) {
+    const saved = store.get("project");
+    const pick = state.projects.find((p) => p.project === saved) || state.projects.find((p) => p.current) || state.projects[0];
+    state.project = pick?.project || null;
+  }
+  renderProjects();
+  renderHeader();
+}
+
+async function loadHistory(scroll = false) {
+  if (!state.project || state.sending) return;
+  const log = await api(`/api/history?project=${encodeURIComponent(state.project)}`);
+  if (log.messages.length === state.lastCount && !scroll) return;
+  state.lastCount = log.messages.length;
+  state.messages = log.messages;
+  renderMessages(scroll);
+}
+
+async function loadModels() {
+  const sel = $("model");
+  try {
+    const models = await api("/api/models");
+    const saved = store.get("model");
+    const def = models.find((m) => m.role === "default")?.name;
+    sel.innerHTML = models.map((m) =>
+      `<option value="${esc(m.name)}">${esc(m.name)}${m.role ? ` (${m.role})` : ""}</option>`).join("");
+    sel.value = models.some((m) => m.name === saved) ? saved : def || models[0]?.name || "";
+  } catch {
+    sel.innerHTML = `<option value="">Ollama not running</option>`;
+  }
+}
+
+async function loadStatus() {
+  try {
+    const s = await api("/api/status");
+    state.config = s.config;
+    const bad = s.checks.filter((c) => !c.ok).length;
+    $("statusDot").className = `dot ${bad ? "bad" : "ok"}`;
+    $("statusText").textContent = bad ? `${bad} setup issue${bad > 1 ? "s" : ""}` : "Setup OK";
+    $("statusBody").innerHTML = s.checks.map((c) => `
+      <div class="check"><span class="icon ${c.ok ? "ok" : "bad"}">${c.ok ? "✓" : "!"}</span>
+        <div><div>${esc(c.label)}</div><div class="detail">${esc(c.detail)}</div></div>
+        ${c.ok ? "" : `<div class="fix">${esc(c.fix)}</div>`}</div>`).join("") + `
+      <div class="cfg">Settings come from <code>${esc(s.configFile)}</code>. Edit it, then run
+        <code>ollama-bridge install</code> to download any new models.</div>`;
+  } catch (e) {
+    $("statusDot").className = "dot bad";
+    $("statusText").textContent = "Status unavailable";
+  }
+}
+
+// ---- actions
+async function sendMessage() {
+  const text = $("input").value.trim();
+  if (!text || state.sending || !state.project) return;
+  const model = $("model").value;
+  state.sending = true;
+  $("sendBtn").disabled = true;
+  $("input").value = "";
+  autosize();
+  state.messages.push({ from: "human", content: text, ts: new Date().toISOString() });
+  const pending = { from: "local", model, content: "Thinking… 0s", pending: true };
+  state.messages.push(pending);
+  renderMessages(true);
+  const started = Date.now();
+  const timer = setInterval(() => {
+    pending.content = `Thinking… ${Math.round((Date.now() - started) / 1000)}s`;
+    const el = document.querySelector(".msg.pending .content");
+    if (el) el.textContent = pending.content;
+  }, 1000);
+  try {
+    await api("/api/chat", { project: state.project, prompt: text, model, useHistory: $("useHistory").checked });
+  } catch (e) {
+    pending.content = `Error: ${e.message}`;
+    pending.pending = false;
+    renderMessages(true);
+    document.querySelector(".msg:last-child .content")?.classList.add("error");
+  } finally {
+    clearInterval(timer);
+    state.sending = false;
+    $("sendBtn").disabled = false;
+  }
+  if (!pending.content.startsWith("Error")) {
+    state.lastCount = -1;
+    await loadHistory(true);
+  }
+  loadProjects();
+}
+
+async function clearHistory() {
+  if (!state.project || !confirm(`Clear the shared conversation for ${basename(state.project)}?\nClaude and the local models will forget it too.`)) return;
+  await api("/api/reset", { project: state.project });
+  state.lastCount = -1;
+  await loadHistory(true);
+  loadProjects();
+}
+
+function autosize() {
+  const t = $("input");
+  t.style.height = "auto";
+  t.style.height = Math.min(t.scrollHeight, 220) + "px";
+}
+
+// ---- events
+$("projects").addEventListener("click", (e) => {
+  const btn = e.target.closest(".project");
+  if (!btn) return;
+  state.project = state.projects[btn.dataset.i].project;
+  store.set("project", state.project);
+  state.lastCount = -1;
+  renderProjects();
+  renderHeader();
+  loadHistory(true);
+});
+$("list").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".copy");
+  if (!btn) return;
+  try {
+    await navigator.clipboard.writeText(btn.nextElementSibling.textContent);
+    btn.textContent = "Copied";
+  } catch { btn.textContent = "Copy failed"; }
+  setTimeout(() => (btn.textContent = "Copy"), 1500);
+});
+$("model").addEventListener("change", () => store.set("model", $("model").value));
+$("sendBtn").addEventListener("click", sendMessage);
+$("input").addEventListener("input", autosize);
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+});
+$("clearBtn").addEventListener("click", clearHistory);
+$("statusBtn").addEventListener("click", () => { loadStatus(); $("statusDlg").showModal(); });
+$("closeDlg").addEventListener("click", () => $("statusDlg").close());
+
+// ---- start: live-refresh so messages from Claude appear on their own
+(async () => {
+  await loadProjects();
+  await Promise.all([loadHistory(true), loadModels()]);
+  loadStatus();
+  setInterval(() => loadHistory().catch(() => {}), 3000);
+  setInterval(() => loadProjects().catch(() => {}), 10000);
+  $("input").focus();
+})();
+</script>
+</body>
+</html>
