@@ -3,10 +3,9 @@
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { loadLog, appendMessages } from "./lib.mjs";
+import { claudeArgs } from "./launch.mjs";
 
 const IS_WIN = process.platform === "win32";
-const MODEL_RE = /^[A-Za-z0-9._:\/\-\[\]]{1,100}$/;
-const MODES = new Set(["", "plan", "acceptEdits", "auto"]);
 const CONTEXT_CHARS = 12000;
 const TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -38,7 +37,8 @@ function spawnClaude(args, opts) {
     child.once("spawn", () => resolve(child));
     child.once("error", (err) => {
       if (IS_WIN && err.code === "ENOENT") {
-        const viaShell = spawn("claude", args, { ...opts, shell: true });
+        const quoted = args.map((a) => (/\s/.test(a) ? `"${a}"` : a));
+        const viaShell = spawn("claude", quoted, { ...opts, shell: true });
         viaShell.once("spawn", () => resolve(viaShell));
         viaShell.once("error", reject);
       } else reject(err);
@@ -47,10 +47,9 @@ function spawnClaude(args, opts) {
 }
 
 // Returns { reply, model, ms, costUsd, isError }.
-export async function runClaude({ dir, prompt, model = "", mode = "", useHistory = true, meta = {} }) {
-  if (model && !MODEL_RE.test(model)) throw new Error(`Invalid model name: ${model}`);
-  if (!MODES.has(mode)) throw new Error(`Unknown start mode: ${mode}`);
-  const args = ["-p", "--output-format", "json", ...(model ? ["--model", model] : []), ...(mode ? ["--permission-mode", mode] : [])];
+export async function runClaude({ dir, prompt, model = "", mode = "", effort = "", fast = false, useHistory = true, meta = {} }) {
+  // claudeArgs validates model, mode and effort.
+  const args = ["-p", "--output-format", "json", ...claudeArgs({ model, mode, effort, fast })];
   const fullPrompt = prompt + (useHistory ? sharedContext(dir) : "");
 
   const started = Date.now();
@@ -88,7 +87,8 @@ export async function runClaude({ dir, prompt, model = "", mode = "", useHistory
       "and sign in, then send this again.";
   }
   const ms = Date.now() - started;
-  const label = `Claude Code${model ? ` (${model})` : ""}`;
+  const details = [model, effort && `${effort} effort`, fast && "fast"].filter(Boolean);
+  const label = `Claude Code${details.length ? ` (${details.join(", ")})` : ""}`;
   appendMessages(dir, entry, {
     from: "claude",
     model: label,

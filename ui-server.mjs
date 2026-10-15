@@ -7,7 +7,7 @@ import { HERE } from "./config.mjs";
 import { chat, loadLog, saveLog } from "./lib.mjs";
 import { checkStatus, modelsWithRoles, effectiveConfig } from "./status.mjs";
 import { allProjects, addProject, removeProject, isKnownProject, claudeCodeProjects, completeDir } from "./projects.mjs";
-import { pickFolder, launchIn, CLAUDE_MODELS, START_MODES } from "./launch.mjs";
+import { pickFolder, launchIn, CLAUDE_MODELS, START_MODES, EFFORT_LEVELS } from "./launch.mjs";
 import { routePrompt } from "./router.mjs";
 import { runClaude } from "./claude-run.mjs";
 
@@ -56,7 +56,7 @@ async function route(req, res, url) {
   if (req.method === "GET" && pathname === "/api/config") return send(res, 200, { ...effectiveConfig(), startDir });
   if (req.method === "GET" && pathname === "/api/projects") return send(res, 200, allProjects(startDir));
   if (req.method === "GET" && pathname === "/api/launch-options") {
-    return send(res, 200, { claudeModels: CLAUDE_MODELS, startModes: START_MODES });
+    return send(res, 200, { claudeModels: CLAUDE_MODELS, startModes: START_MODES, effortLevels: EFFORT_LEVELS });
   }
   if (req.method === "GET" && pathname === "/api/complete") return send(res, 200, completeDir(url.searchParams.get("path")));
   if (req.method === "GET" && pathname === "/api/suggestions") {
@@ -98,6 +98,8 @@ async function route(req, res, url) {
         prompt: body.prompt,
         model: body.model || "",
         mode: body.plan === true ? "plan" : body.mode || "",
+        effort: body.effort || "",
+        fast: body.fast === true,
         useHistory: body.useHistory !== false,
         meta: routeMeta(body.route),
       });
@@ -112,7 +114,7 @@ async function route(req, res, url) {
       const dir = projectParam(body.project);
       // Only open terminals in folders that are on the project list.
       if (!isKnownProject(dir, startDir)) return send(res, 400, { error: "Add the folder as a project first" });
-      await launchIn(dir, body.what, { model: body.model || "", mode: body.mode || "" });
+      await launchIn(dir, body.what, { model: body.model || "", mode: body.mode || "", effort: body.effort || "", fast: body.fast === true });
       return send(res, 200, { ok: true });
     }
     if (pathname === "/api/reset") {

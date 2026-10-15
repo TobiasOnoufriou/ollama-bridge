@@ -72,26 +72,45 @@ export const START_MODES = {
   acceptEdits: "Auto-accept edits",
   auto: "Auto mode",
 };
+export const EFFORT_LEVELS = { "": "Default", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
 // Model names go straight into a shell command, so only allow characters model ids actually use.
 const MODEL_RE = /^[A-Za-z0-9._:\/\-\[\]]{1,100}$/;
+// Fast mode has no CLI flag; it's a per-session setting. A file avoids quoting JSON through PowerShell.
+const FAST_SETTINGS = path.join(HERE, "fast-mode.settings.json");
 
-function claudeFlags({ model, mode }, modelFlag) {
+// Claude Code arguments for the chosen options; opts: { model, mode, effort, fast }.
+// local = Claude Code running on an Ollama model, where effort and fast mode don't apply.
+export function claudeArgs({ model = "", mode = "", effort = "", fast = false } = {}, { local = false } = {}) {
   if (model && !MODEL_RE.test(model)) throw new Error(`Invalid model name: ${model}`);
   if (mode && !(mode in START_MODES)) throw new Error(`Unknown start mode: ${mode}`);
-  return [...(model ? [modelFlag, model] : []), ...(mode ? ["--permission-mode", mode] : [])].join(" ");
+  if (effort && !(effort in EFFORT_LEVELS)) throw new Error(`Unknown effort level: ${effort}`);
+  const args = [...(model ? [local ? "-Model" : "--model", model] : []), ...(mode ? ["--permission-mode", mode] : [])];
+  if (!local) {
+    if (effort) args.push("--effort", effort);
+    if (fast) {
+      if (!fs.existsSync(FAST_SETTINGS)) fs.writeFileSync(FAST_SETTINGS, JSON.stringify({ fastMode: true }) + "\n");
+      args.push("--settings", FAST_SETTINGS);
+    }
+  }
+  return args;
+}
+
+// Join args into a shell command line, quoting any arg that isn't plain (the settings path can have spaces).
+function shellJoin(args) {
+  return args.map((a) => (/^[\w.:\/\-\[\]]+$/.test(a) ? a : IS_WIN ? `'${a.replace(/'/g, "''")}'` : shQuote(a))).join(" ");
 }
 
 // Shell command to run in the new terminal for each target (null = just a shell).
 export function commandFor(what, opts) {
-  if (what === "claude") return `claude ${claudeFlags(opts, "--model")}`.trim();
+  if (what === "claude") return `claude ${shellJoin(claudeArgs(opts))}`.trim();
   if (what === "local") {
     const bridge = IS_WIN ? `& '${path.join(HERE, "ollama-bridge.cmd").replace(/'/g, "''")}'` : shQuote(path.join(HERE, "ollama-bridge"));
-    return `${bridge} claude ${claudeFlags(opts, "-Model")}`.trim();
+    return `${bridge} claude ${shellJoin(claudeArgs(opts, { local: true }))}`.trim();
   }
   return null;
 }
 
-// opts: { model, mode } for the claude and local targets; model is a Claude alias/id or an Ollama model name.
+// opts: { model, mode, effort, fast } for the claude and local targets; model is a Claude alias/id or an Ollama model name.
 export async function launchIn(dir, what, opts = {}) {
   if (!(what in LAUNCH_TARGETS)) throw new Error(`Unknown launch target: ${what}`);
   if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`Folder not found: ${dir}`);

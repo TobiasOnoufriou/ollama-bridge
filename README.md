@@ -62,6 +62,7 @@ ollama-bridge open claude        # new terminal window running Claude Code in th
 ollama-bridge open local ~/code/my-app   # ...Claude Code on the local model, in another folder
 ollama-bridge open terminal      # ...or just a shell; `open folder` opens the file manager
 ollama-bridge open claude --model sonnet --plan   # pick the Claude model and start in plan mode
+ollama-bridge open claude --model opus --effort high --fast   # effort level and fast mode
 ollama-bridge chat --plan        # terminal chat in plan mode (type /plan to toggle)
 ollama-bridge reset              # clear this folder's shared log
 ollama-bridge install            # re-run the installer
@@ -90,13 +91,23 @@ Each project has buttons to open, in that folder: **Claude** (Claude Code in a n
 (`x-terminal-emulator`, GNOME Terminal, Konsole, xfce4-terminal, kitty, Alacritty or xterm). On Linux, **Browse…**
 needs `zenity` or `kdialog`; you can always type the path instead.
 
-Under the buttons, pick how they start (remembered in your browser):
+### Settings
 
-- **Claude model:** Default, Fable, Opus, Sonnet or Haiku (aliases, so always the latest version).
-- **Local model:** which Ollama model **Claude (local)** uses. Only models that make real tool calls are
-  selectable; the ones that don't (`qwen2.5-coder`, `deepseek-r1`) are shown greyed out.
-- **Start in:** Normal, **Plan mode** (Claude researches and proposes a plan before changing anything),
-  Auto-accept edits or Auto mode.
+A line under the buttons sums up what everything will use, for example
+*Chat: Qwen 2.5 Coder 14B · Claude: Opus, high effort, fast · Claude (local): Qwen 3.6 (long context)*.
+Click it, or **Settings**, to change it (choices are remembered in your browser). Models are shown with
+readable names, what they're for and their size.
+
+- **Local model:** the model that answers in the chat, and whether it gets the shared history.
+- **Claude Code** (the **Claude** button, and Claude / Smart in the chat):
+  - **Model:** Default, Fable, Opus, Sonnet or Haiku (aliases, so always the latest version).
+  - **Effort:** Default, Low, Medium, High, Extra high or Max (`--effort`). Higher thinks longer.
+  - **Fast mode:** up to 2.5× faster Opus at a higher price. Opus only (other models switch to Opus), and
+    billed to usage credits rather than your plan's limits. Passed per session with `--settings`.
+  - **Starts in:** Normal, **Plan mode** (research and propose a plan before changing anything),
+    Auto-accept edits or Auto mode.
+- **Claude Code on a local model** (the **Claude (local)** button): which Ollama model runs it. Only models
+  that make real tool calls are selectable; `qwen2.5-coder` and `deepseek-r1` are shown greyed out.
 
 ### Smart prompt: local model or Claude?
 

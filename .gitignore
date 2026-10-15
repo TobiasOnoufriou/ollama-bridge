@@ -6,3 +6,4 @@ node_modules/
 config.json
 models/
 projects.json
+fast-mode.settings.json

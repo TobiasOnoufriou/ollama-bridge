@@ -25,7 +25,7 @@ ${bold("Usage:")} ollama-bridge <command> [options]
 
   ${cyan("ui")} [--port N] [--no-open]   Open the web UI (projects, shared conversations, chat, status)
   ${cyan("ask")} "<prompt>"              Smart prompt: routes to the local model or Claude Code, then answers
-                              --local / --claude to force a side, --model <name>, --plan
+                              --local / --claude to force a side, --model, --effort, --fast, --plan
   ${cyan("chat")} [model]                Chat with a local model in this folder's shared log
   ${cyan("claude")} [claude args]        Run Claude Code on the local model (same as claude-local)
   ${cyan("status")}                      Check that everything is installed and wired up
@@ -40,6 +40,8 @@ ${bold("Usage:")} ollama-bridge <command> [options]
                               --model <name>  Claude model (fable, opus, sonnet, haiku) or
                                               Ollama model for local
                               --plan          start in plan mode (or --mode acceptEdits|auto)
+                              --effort <level> low, medium, high, xhigh or max
+                              --fast          fast mode (Opus only, billed to usage credits)
   ${cyan("reset")} [--yes]               Clear this folder's shared log
   ${cyan("install")} [--yes]             Run the installer (safe to re-run)
   ${cyan("help")}                        Show this help
@@ -66,8 +68,9 @@ switch (cmd) {
   }
 
   case "ask": {
-    const modelArg = args.includes("--model") ? args[args.indexOf("--model") + 1] : "";
-    const prompt = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--model").join(" ").trim();
+    const optArg = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : "");
+    const modelArg = optArg("--model");
+    const prompt = args.filter((a, i) => !a.startsWith("--") && !["--model", "--effort"].includes(args[i - 1])).join(" ").trim();
     if (!prompt) {
       console.error(red('Usage: ollama-bridge ask "<prompt>" [--local | --claude] [--model name] [--plan]'));
       process.exit(1);
@@ -82,7 +85,7 @@ switch (cmd) {
         const { reply, model } = await chat({ from: "human", prompt, model: modelArg || undefined, plan, meta: { route } });
         console.log(`${bold(yellow(model))}\n${reply}`);
       } else {
-        const out = await runClaude({ dir: projectDir(), prompt, model: modelArg, mode: plan ? "plan" : "", meta: { route } });
+        const out = await runClaude({ dir: projectDir(), prompt, model: modelArg, mode: plan ? "plan" : "", effort: optArg("--effort"), fast: flag("--fast"), meta: { route } });
         console.log(`${bold(cyan(out.model))}${dim(` ${(out.ms / 1000).toFixed(0)}s`)}\n${out.reply}`);
         if (out.isError) process.exit(1);
       }
@@ -160,7 +163,7 @@ switch (cmd) {
   case "open": {
     // ollama-bridge open <what> [folder] [--model name] [--plan | --mode plan|acceptEdits|auto]
     const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : "");
-    const positional = args.filter((a, i) => !a.startsWith("--") && !["--model", "--mode"].includes(args[i - 1]));
+    const positional = args.filter((a, i) => !a.startsWith("--") && !["--model", "--mode", "--effort"].includes(args[i - 1]));
     const [what, folder = "."] = positional;
     if (!(what in LAUNCH_TARGETS)) {
       console.error(red(`Usage: ollama-bridge open <${Object.keys(LAUNCH_TARGETS).join("|")}> [folder] [--model name] [--plan]`));
@@ -168,7 +171,7 @@ switch (cmd) {
     }
     try {
       const dir = resolveUserPath(folder);
-      await launchIn(dir, what, { model: opt("--model"), mode: flag("--plan") ? "plan" : opt("--mode") });
+      await launchIn(dir, what, { model: opt("--model"), mode: flag("--plan") ? "plan" : opt("--mode"), effort: opt("--effort"), fast: flag("--fast") });
       console.log(green(`Opened ${LAUNCH_TARGETS[what]} in ${dir}`));
     } catch (err) {
       console.error(red(err.message));
