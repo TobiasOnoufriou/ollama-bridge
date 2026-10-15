@@ -180,7 +180,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   process.stdin.on("data", (d) => (input += d));
   process.stdin.on("end", () => {
     try {
-      const hint = hookHint(JSON.parse(input));
+      const hint = hookHint(JSON.parse(input.replace(/^﻿/, ""))); // Windows PowerShell pipes add a BOM
       if (hint) process.stdout.write(JSON.stringify({ systemMessage: hint }));
     } catch {}
     process.exit(0);
