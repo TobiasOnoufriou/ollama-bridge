@@ -66,6 +66,8 @@ ollama-bridge open terminal      # ...or just a shell; `open folder` opens the f
 ollama-bridge open claude --model sonnet --plan   # pick the Claude model and start in plan mode
 ollama-bridge open claude --model opus --effort high --fast   # effort level and fast mode
 ollama-bridge chat --plan        # terminal chat in plan mode, step by step (type /plan to toggle; --quick for one pass)
+ollama-bridge issues             # GitHub issues of this folder's repo
+ollama-bridge issue 12           # new Claude Code window working on issue #12 (--local, --no-branch, --plan, ...)
 ollama-bridge handoff            # free hand-off note (local model) for starting a new, cheaper Claude session
 ollama-bridge reset              # clear this folder's shared log
 ollama-bridge install            # re-run the installer
@@ -89,10 +91,42 @@ header). This removes it from the list, including the folder you started the UI 
 shared conversation. The folder and its files on disk are never touched; add it again any time.
 
 Each project has buttons to open, in that folder: **Claude** (Claude Code in a new terminal), **Claude (local)**
-(the same on your local model), **Terminal** and **Folder**. Windows uses Windows Terminal when it's installed
+(the same on your local model), **Terminal** and **Folder**, plus **Issues** to start a session on a GitHub issue
+(see [below](#start-a-session-from-a-github-issue)). Windows uses Windows Terminal when it's installed
 (otherwise a PowerShell window), macOS uses Terminal.app, and Linux uses the first terminal it finds
 (`x-terminal-emulator`, GNOME Terminal, Konsole, xfce4-terminal, kitty, Alacritty or xterm). On Linux, **Browse…**
 needs `zenity` or `kdialog`; you can always type the path instead.
+
+### Start a session from a GitHub issue
+
+**Issues** in a project's header (or <kbd>Alt</kbd>+<kbd>I</kbd>) lists the GitHub issues of the folder's repo, found
+from its git remote (`origin` first). Switch between Open, Closed and All, and search with GitHub's syntax
+(`label:bug login`). Pick an issue (click, or <kbd>↑</kbd>/<kbd>↓</kbd>), then:
+
+- **Start in Claude:** opens Claude Code in a new terminal in the project, using the model, effort, fast mode and start
+  mode from Settings, already working on the issue. The session is named after it (`#12 Fix login redirect`), so
+  it's easy to find in `/resume`. <kbd>Enter</kbd> or a double-click does the same.
+- **Claude (local):** the same, on your local model.
+- **Plan locally:** the local model writes a step-by-step plan for the issue in this chat (free). Its **Implement with
+  Claude** button then hands the plan to Claude.
+
+With **New branch** ticked (the default), Claude first creates a branch such as `issue-12-fix-login-redirect`.
+The issue's title, body and latest 30 comments are saved to `logs/issues/<owner>__<repo>/issue-12.md`. Claude
+gets access to that one folder and a short first message pointing at the file. It's told the text came from GitHub,
+so it treats it as a description of the task rather than as instructions. Long issues are cut at about 60k
+characters.
+
+From a terminal:
+
+```bash
+ollama-bridge issues                 # open issues of this folder's repo (--closed, --all, --search "label:bug")
+ollama-bridge issue 12               # new Claude Code window working on #12, on a new branch
+ollama-bridge issue 12 --local --plan --no-branch   # on the local model, in plan mode, on the current branch
+```
+
+Issues are read with the [GitHub CLI](https://cli.github.com) when it's installed and signed in (`gh auth login`),
+which also covers private repos. Without it, GitHub's public API is used: public repos only, about 60 requests an
+hour, or more with `GITHUB_TOKEN` set. Pull requests are left out.
 
 ### Settings
 
