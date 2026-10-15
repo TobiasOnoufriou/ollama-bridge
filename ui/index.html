@@ -126,6 +126,13 @@
   label.toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
 
   #messages { flex: 1; overflow-y: auto; padding: 20px; }
+  #sessionHints:empty { display: none; }
+  #sessionHints { padding: 10px 20px 0; }
+  .shint { display: flex; gap: 10px; align-items: center; padding: 8px 12px; margin-bottom: 6px; font-size: 13px;
+    border: 1px solid var(--warn); border-radius: var(--radius); background: var(--panel); }
+  .shint .t { flex: 1; min-width: 0; }
+  .shint .t b { color: var(--warn); }
+  .shint button { flex-shrink: 0; }
   .inner { max-width: 860px; margin: 0 auto; }
   .msg { display: flex; gap: 12px; margin-bottom: 18px; }
   .avatar {
@@ -405,6 +412,7 @@
     </div>
   </header>
 
+  <div id="sessionHints"></div>
   <div id="messages"><div class="inner" id="list"></div></div>
 
   <div class="composer">
@@ -858,9 +866,61 @@ async function loadProjects() {
   renderHeader();
 }
 
+// Long Claude sessions cost more per message (each one re-reads the whole context): suggest a fresh one.
+// Dismissing hides a hint until the session grows another 50k tokens.
+const hintKey = (h) => `${state.project}|${h.kind}|${h.session || ""}|${Math.floor(h.tokens / 50000)}`;
+const dismissedHints = new Set();
+function renderSessionHints(hints) {
+  const k = (n) => `${Math.round(n / 1000)}k`;
+  const shown = hints.filter((h) => !dismissedHints.has(hintKey(h)));
+  $("sessionHints").innerHTML = shown.map((h) => {
+    const size = `<b>${k(h.tokens)} tokens</b>, ${h.ratio.toFixed(1)}× a fresh session (${k(h.baseline)})`;
+    const [text, btn] = h.kind === "chat"
+      ? [`Claude's session for this chat is at ${size}. Every message re-reads all of it; starting fresh cuts each ` +
+          `message's input by about ${h.percent}%, and the recent conversation is passed on for free.`,
+        `<button data-hint="fresh" title="The next Claude message starts a new session">Start fresh</button>`]
+      : [`Your latest Claude Code session in this folder is at ${size}. If you're moving on to something new, a new ` +
+          `session cuts each message's input by about ${h.percent}%.`,
+        `<button data-hint="handoff" data-session="${esc(h.session)}" title="Your local model summarises the session for free and copies the note, to paste into a new session">Hand-off note</button>`];
+    return `<div class="shint inner" data-key="${esc(hintKey(h))}"><span class="t">💡 ${text}</span>${btn}
+      <button class="ghost" data-hint="dismiss" title="Hide until it grows another 50k tokens">✕</button></div>`;
+  }).join("");
+}
+
+$("sessionHints").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-hint]");
+  if (!b) return;
+  const box = b.closest(".shint");
+  if (b.dataset.hint === "dismiss") {
+    dismissedHints.add(box.dataset.key);
+    box.remove();
+    return;
+  }
+  b.disabled = true;
+  try {
+    if (b.dataset.hint === "fresh") {
+      await api("/api/claude/fresh", { project: state.project });
+      dismissedHints.add(box.dataset.key);
+      box.remove();
+      toast("The next Claude message starts a new session");
+    } else {
+      b.textContent = "Summarising…";
+      const out = await api("/api/handoff", { project: state.project, session: b.dataset.session, model: $("model").value || undefined });
+      toast(out.copied ? "Hand-off note copied: paste it as the first message of a new session" : "Hand-off note added to the conversation");
+      state.lastCount = -1;
+      await loadHistory(true);
+    }
+  } catch (err) {
+    toast(err.message, true);
+    b.disabled = false;
+    if (b.dataset.hint === "handoff") b.textContent = "Hand-off note";
+  }
+});
+
 async function loadHistory(scroll = false) {
   if (!state.project || state.sending) return;
   const log = await api(`/api/history?project=${encodeURIComponent(state.project)}`);
+  renderSessionHints(log.sessionHints || []);
   if (log.messages.length === state.lastCount && !scroll) return;
   state.lastCount = log.messages.length;
   state.messages = log.messages;

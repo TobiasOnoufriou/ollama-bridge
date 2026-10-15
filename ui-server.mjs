@@ -14,6 +14,8 @@ import { usage } from "./usage.mjs";
 import { projectContext } from "./context.mjs";
 import { planAndLog } from "./planner.mjs";
 import { implementAndReview } from "./review.mjs";
+import { contextSize, transcriptFor, recentTranscripts, shouldHint, savings } from "./session-hint.mjs";
+import { handoff, copyToClipboard } from "./handoff.mjs";
 
 // Live progress of step-by-step plans, by an id the page picks.
 const progress = new Map();
@@ -22,6 +24,25 @@ const progress = new Map();
 function routeMeta(route) {
   if (!route || !["local", "claude"].includes(route.to)) return {};
   return { route: { to: route.to, reason: String(route.reason || "").slice(0, 160), by: String(route.by || "").slice(0, 20), ...(["low", "medium"].includes(route.effort) ? { effort: route.effort } : {}) } };
+}
+
+// Claude sessions in this project whose context has grown past the hint threshold, so the page can suggest a new one:
+//  - "chat": the session the chat resumes for Claude runs (one per toolset).
+//  - "terminal": the latest Claude Code session in the folder (desktop app or terminal), if active in the last day.
+function sessionHints(dir) {
+  const hints = [];
+  const log = loadLog(dir);
+  for (const saved of Object.values(log.claude || {})) {
+    const size = contextSize(transcriptFor(saved.session, dir));
+    if (shouldHint(size)) hints.push({ kind: "chat", tokens: size.tokens, baseline: size.baseline, ...savings(size) });
+  }
+  const chatSessions = new Set(Object.values(log.claude || {}).map((s) => s.session));
+  const latest = recentTranscripts(dir).find((f) => !chatSessions.has(path.basename(f, ".jsonl")));
+  const size = latest && contextSize(latest);
+  if (shouldHint(size) && Date.now() - Date.parse(size.ts) < 86400e3) {
+    hints.push({ kind: "terminal", session: path.basename(latest, ".jsonl"), tokens: size.tokens, baseline: size.baseline, ...savings(size) });
+  }
+  return hints.sort((a, b) => b.tokens - a.tokens).slice(0, 2);
 }
 
 const DEFAULT_PORT = 4317;
@@ -75,7 +96,8 @@ async function route(req, res, url) {
     return send(res, 200, claudeCodeProjects().filter((p) => !listed.has(p.toLowerCase())));
   }
   if (req.method === "GET" && pathname === "/api/history") {
-    return send(res, 200, loadLog(projectParam(url.searchParams.get("project"))));
+    const dir = projectParam(url.searchParams.get("project"));
+    return send(res, 200, { ...loadLog(dir), sessionHints: sessionHints(dir) });
   }
   if (req.method === "GET" && pathname === "/api/models") return send(res, 200, await modelsWithRoles());
   if (req.method === "GET" && pathname === "/api/status") return send(res, 200, await checkStatus());
@@ -182,6 +204,20 @@ async function route(req, res, url) {
       if (!isKnownProject(dir, startDir)) return send(res, 400, { error: "Add the folder as a project first" });
       await launchIn(dir, body.what, { model: body.model || "", mode: body.mode || "", effort: body.effort || "", fast: body.fast === true });
       return send(res, 200, { ok: true });
+    }
+    // Forget the chat's Claude sessions: the next Claude run starts fresh, with recent shared messages as background.
+    if (pathname === "/api/claude/fresh") {
+      const dir = projectParam(body.project);
+      const log = loadLog(dir);
+      delete log.claude;
+      saveLog(log, dir);
+      return send(res, 200, { ok: true });
+    }
+    if (pathname === "/api/handoff") {
+      const dir = projectParam(body.project);
+      const out = await handoff({ dir, session: String(body.session || ""), model: body.model || undefined });
+      // Copied here rather than in the page: the summary takes longer than a browser allows a clipboard write after a click.
+      return send(res, 200, { note: out.note, model: out.model, copied: copyToClipboard(out.note) });
     }
     if (pathname === "/api/reset") {
       const dir = projectParam(body.project);

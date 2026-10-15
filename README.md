@@ -38,6 +38,8 @@ The installer is safe to re-run (add `--yes` to answer yes to every question). I
 5. Puts `claude-local` and `local-chat` on PATH: this folder on your user PATH (Windows), or symlinks in
    `~/.local/bin` (macOS/Linux), asking before editing your shell rc file.
 6. Adds a marked section to `~/.claude/CLAUDE.md` telling Claude when to offload work via `ask_local`.
+7. Asks to add a Stop hook to `~/.claude/settings.json` that suggests a new session when one gets expensive
+   (see [When to start a new session](#when-to-start-a-new-session)).
 
 Open a new terminal afterwards so the PATH change applies.
 
@@ -64,6 +66,7 @@ ollama-bridge open terminal      # ...or just a shell; `open folder` opens the f
 ollama-bridge open claude --model sonnet --plan   # pick the Claude model and start in plan mode
 ollama-bridge open claude --model opus --effort high --fast   # effort level and fast mode
 ollama-bridge chat --plan        # terminal chat in plan mode, step by step (type /plan to toggle; --quick for one pass)
+ollama-bridge handoff            # free hand-off note (local model) for starting a new, cheaper Claude session
 ollama-bridge reset              # clear this folder's shared log
 ollama-bridge install            # re-run the installer
 ```
@@ -145,6 +148,36 @@ steps). It never picks above medium; an effort you choose in Settings always win
   43.2k tokens, mostly cache reads, and $0.011 after, about 75% less.
 - The bridge's tool descriptions and its `~/.claude/CLAUDE.md` section, which load into every Claude Code
   session, are about 60% shorter, and `local_history` returns at most about 4,000 characters.
+
+### When to start a new session
+
+Claude re-reads a session's whole context on every message. Most of it comes from the prompt cache, but cache reads
+are still billed per token, so a message in a 300k-token session costs several times more than the same message in
+a fresh one. Past a threshold (100k tokens by default), the bridge suggests starting fresh:
+
+- **In Claude Code** (desktop app or terminal): a Stop hook (`session-hint.mjs`, added by the installer if you say
+  yes) checks the session after each reply and shows a line like *This session's context is 180k tokens, 2.7× what a
+  fresh session here starts with (68k)... a new session cuts each message's input by about 62%*. The line goes to
+  you only, so it costs no tokens. It appears once at 100k, then again every further 50k, and the check takes about
+  0.1 s, even on multi-megabyte transcripts. It skips sessions running on a local model, which are free anyway.
+- **In the web UI:** a banner above the conversation when the Claude session the chat resumes, or your latest Claude
+  Code session in that folder, is past the threshold. **Start fresh** makes the next Claude message start a new
+  session; the recent shared conversation is passed on as before, so nothing is lost. **✕** hides the banner until
+  the session grows another 50k tokens.
+
+The fresh-session size is measured from that session's own first message, so the savings figure fits your setup:
+in the desktop app a new session here starts at about 68k tokens of system prompt and tools.
+
+**Hand-off notes for free.** Asking Claude to summarise a long session costs one more full-context message. Instead,
+run `ollama-bridge handoff` in the project folder, or click **Hand-off note** in the banner. It reads the latest
+session's transcript on disk and boils it down in code (your requests, Claude's replies, files edited, commands run),
+then your local model writes a short note: goal, what's done, decisions, and what's next. The branch and the
+edited files are added in code, so the model can't drop or invent them. The note is copied to the clipboard and
+saved in the shared conversation. Start a new session (`/clear`, or a new window) and paste it as your first
+message. `--session <id>` picks an older session, and `--model` picks the local model. It takes about 20 seconds
+with `qwen2.5-coder:14b`. Files changed through a shell command rather than Claude's edit tools aren't in the file list.
+
+Only start fresh when you're moving on to something new. Mid-task, the context is usually worth what it costs.
 
 ### Usage
 
@@ -280,6 +313,8 @@ Edit `config.json` (per machine, not committed) and re-run `node install.mjs` to
 | `claudeLocalCtx` | `65536` | context size of that variant |
 | `ollamaUrl` | `http://localhost:11434` | everything |
 | `embedModel` | `nomic-embed-text` | project-aware plans (search by meaning); the installer offers to download it |
+| `newSessionHintTokens` | `100000` | context size at which a new session is suggested; `0` turns the hint off |
+| `newSessionHintEvery` | `50000` | how much further a session grows before the hint shows again |
 
 Environment variables override the config:
 
