@@ -340,6 +340,36 @@ function setupClaudeMd(cfg) {
   ok(`${start !== -1 ? "Updated" : "Added"} the ollama-bridge section in ${file}`);
 }
 
+// ---------------------------------------------------------------- 7. new-session hint (Stop hook)
+// After each reply, session-hint.mjs checks the session's context and, past ~100k tokens, tells the user a new
+// session would be cheaper. It only reads the transcript and prints a line for the user; Claude never sees it.
+function hookCommand() {
+  return `node "${path.join(HERE, "session-hint.mjs").replace(/\\/g, "/")}"`;
+}
+
+async function setupSessionHint() {
+  step("New-session hint in Claude Code");
+  const file = path.join(HOME, ".claude", "settings.json");
+  let settings = {};
+  try {
+    settings = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (err) {
+    if (fs.existsSync(file)) return warn(`Couldn't read ${file} (${err.message}); skipping`);
+  }
+  const command = hookCommand();
+  const stop = settings.hooks?.Stop || [];
+  const ours = (h) => /session-hint\.mjs/.test(h.command || "");
+  if (stop.some((g) => (g.hooks || []).some((h) => h.command === command))) return ok("Stop hook already installed");
+  if (!(await ask(`Show a hint in Claude Code when a session's context gets large enough that a new session would be cheaper? (adds a Stop hook to ${file})`))) return;
+  // Drop an older copy of our hook (e.g. from another folder) and keep everyone else's.
+  const kept = stop.map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !ours(h)) })).filter((g) => g.hooks.length);
+  settings.hooks = { ...settings.hooks, Stop: [...kept, { hooks: [{ type: "command", command, timeout: 10 }] }] };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
+  ok(`Added the Stop hook: ${command}`);
+  info("Change the threshold with newSessionHintTokens in config.json (0 turns it off)");
+}
+
 // ---------------------------------------------------------------- main
 console.log(bold(`ollama-bridge installer (${process.platform}, ${HERE})`));
 try {
@@ -349,6 +379,7 @@ try {
   registerMcp();
   await setupPath();
   setupClaudeMd(cfg);
+  await setupSessionHint();
   console.log(`\n${bold(green("Done."))} Open a new terminal, then try:`);
   info("ollama-bridge ui  (web UI: shared conversations, chat, setup status)");
   info("ollama-bridge     (list every command)");

@@ -5,5 +5,7 @@
   "claudeLocalModel": "qwen3.6",
   "claudeLocalCtx": 65536,
   "ollamaUrl": "http://localhost:11434",
-  "embedModel": "nomic-embed-text"
+  "embedModel": "nomic-embed-text",
+  "newSessionHintTokens": 100000,
+  "newSessionHintEvery": 50000
 }

@@ -44,6 +44,8 @@ ${bold("Usage:")} ollama-bridge <command> [options]
                               --plan          start in plan mode (or --mode acceptEdits|auto)
                               --effort <level> low, medium, high, xhigh or max
                               --fast          fast mode (Opus only, billed to usage credits)
+  ${cyan("handoff")}                     Summarise this folder's latest Claude Code session with the local model,
+                              for pasting into a new (cheaper) session. --session <id>, --model, --no-copy
   ${cyan("reset")} [--yes]               Clear this folder's shared log
   ${cyan("install")} [--yes]             Run the installer (safe to re-run)
   ${cyan("help")}                        Show this help
@@ -182,6 +184,25 @@ switch (cmd) {
       const dir = resolveUserPath(folder);
       await launchIn(dir, what, { model: opt("--model"), mode: flag("--plan") ? "plan" : opt("--mode"), effort: opt("--effort"), fast: flag("--fast") });
       console.log(green(`Opened ${LAUNCH_TARGETS[what]} in ${dir}`));
+    } catch (err) {
+      console.error(red(err.message));
+      process.exit(1);
+    }
+    break;
+  }
+
+  case "handoff": {
+    // ollama-bridge handoff [--session id] [--model name] [--no-copy]
+    const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : "");
+    const { handoff, copyToClipboard, describeSize } = await import("./handoff.mjs");
+    try {
+      console.log(dim("Reading the latest Claude Code session in this folder and summarising it locally…"));
+      const out = await handoff({ dir: projectDir(), session: opt("--session"), model: opt("--model") || undefined });
+      console.log(dim(`Session ${path.basename(out.file, ".jsonl")} (${describeSize(out.size)}), note by ${out.model}:\n`));
+      console.log(out.note);
+      const copied = !flag("--no-copy") && copyToClipboard(out.note);
+      console.log(`\n${green(copied ? "Copied to the clipboard." : "Copy the note above.")} Start a new session (${cyan("/clear")} in Claude Code, ` +
+        `or a new window) and paste it as your first message.`);
     } catch (err) {
       console.error(red(err.message));
       process.exit(1);
