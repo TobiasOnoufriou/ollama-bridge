@@ -2,7 +2,7 @@
 // Clear-cut cases are decided by rules (instant); the rest by asking the fast local model to classify.
 import fs from "node:fs";
 import path from "node:path";
-import { OLLAMA_URL, DEFAULT_MODEL } from "./lib.mjs";
+import { OLLAMA_URL, DEFAULT_MODEL, loadLog } from "./lib.mjs";
 
 const CLASSIFIER_PROMPT = `You route a user's request to one of two assistants. Reply with JSON only.
 
@@ -30,7 +30,18 @@ const CLAUDE_HINTS = [
   /\b(commit|pull request|\bpr\b|git (diff|log|history))\b/i,
   /\b(review|audit) (my|the|this) (code|changes|pr)\b/i,
   /\b(edit|update|change|modify|create|delete) (the |my )?(file|files|folder|directory)\b/i,
+  /\b(carry out|apply|execute|follow|implement) (the|this|that|your) plan\b|\bmake (the|these|those) changes\b/i,
 ];
+
+// "Go ahead", "do it", "yes": on its own the classifier sees a trivial message and keeps it local, which can't
+// edit anything. Right after a plan it means "implement that plan", so it goes to Claude.
+const GO_AHEAD = /^\W*(ok(ay)?|yes|yep|yeah|sure|great|good|perfect|sounds good|looks good|lgtm|please)?\W*(go ahead|go for it|do it|do that|proceed|continue|start|implement( it| this| that)?|apply( it| this| that)?|build( it)?|make (it|the changes)|yes|ok(ay)?|yep|sure|lgtm|sounds good|looks good)\b/i;
+
+function followsPlan(prompt, dir) {
+  if (!dir || prompt.length > 300 || !GO_AHEAD.test(prompt)) return false;
+  const last = loadLog(dir).messages.findLast((m) => m.from !== "human");
+  return last?.mode === "plan";
+}
 
 // A token that names a file or folder that exists in the project means Claude needs to look at it.
 function mentionsProjectFile(prompt, dir) {
@@ -61,6 +72,7 @@ function byRules(prompt, dir) {
   const heavy = /\b(fix|debug|bugs?|crash\w*|broken|fail\w*|error|optimi[sz]e|why (does|is|do))\b/i.test(prompt);
   const quick = prompt.length < 160 && !heavy && !CLAUDE_HINTS.some((re) => re.test(prompt)) ? "low" : "medium";
   if (file) return { route: "claude", effort: quick, reason: `mentions ${file} in this project` };
+  if (followsPlan(prompt, dir)) return { route: "claude", effort: "medium", reason: "goes ahead with the plan above" };
   // Capitalised framework names (Node.js, Vue.js, Next.js) aren't files.
   const named = [...outsideCode.matchAll(new RegExp(FILE_RE.source, "gi"))].map((m) => m[0]).find((n) => !/^[A-Z][a-z]+\.js$/.test(n));
   if (named) return { route: "claude", effort: quick, reason: `asks about ${named}, which the local model can't open` };

@@ -153,7 +153,8 @@ Under the message box, choose where a message goes: **Local** (the model picked 
 
 1. **Rules first (instant).** Prompts that name a file (`app.js`, `src/utils.py`, ...), mention a file in the
    project, ask for project work (refactor, implement, run the tests, edit files, review my code...) or are very
-   long go to Claude. Code pasted in a fenced block doesn't count as naming a file.
+   long go to Claude. Code pasted in a fenced block doesn't count as naming a file. A short go-ahead ("go ahead",
+   "do it", "yes, implement it") right after a plan also goes to Claude, so untick **Plan** and reply to implement.
 2. **Otherwise the local model classifies it** (about 0.3 s once loaded). Explanations, snippets, regex, SQL,
    conversions and short summaries stay local; anything needing files, several steps, debugging, design
    decisions or high accuracy goes to Claude. When unsure it picks Claude.
