@@ -63,7 +63,7 @@ ollama-bridge open local ~/code/my-app   # ...Claude Code on the local model, in
 ollama-bridge open terminal      # ...or just a shell; `open folder` opens the file manager
 ollama-bridge open claude --model sonnet --plan   # pick the Claude model and start in plan mode
 ollama-bridge open claude --model opus --effort high --fast   # effort level and fast mode
-ollama-bridge chat --plan        # terminal chat in plan mode (type /plan to toggle)
+ollama-bridge chat --plan        # terminal chat in plan mode, step by step (type /plan to toggle; --quick for one pass)
 ollama-bridge reset              # clear this folder's shared log
 ollama-bridge install            # re-run the installer
 ```
@@ -204,6 +204,32 @@ kept in the conversation (shown under your message as *Read N parts of the proje
 In a test on this repo, five requests worded to share no words with the code found the key code in four; the
 fifth attached the right files but not the one function the test checked for. It's much better than guessing,
 not perfect: check the file list, and drop in anything missing.
+
+#### Step-by-step plans (the default)
+
+A 14B model asked for a whole plan in one go drops steps: in testing it changed the data and the route but forgot
+the button on the page. The [Minions](https://arxiv.org/abs/2502.15964) paper found the same, that small models
+struggle with multi-step instructions and long contexts but do well on single-step questions over short text. So
+plans are built from small questions (`planner.mjs`), each answered as JSON forced to a schema:
+
+1. **Scope:** which files and functions are involved, from the project outline.
+2. **Per file:** what changes in this one file (only that file is shown).
+3. **Ripple:** the bridge searches for every other place that uses what changes and asks, for each one,
+   "does this need to change too?". This is what finds the missing button or route.
+4. **Checks**, in code: every function the plan names exists in its file; every new function is used by a change
+   elsewhere; places that use what changes were considered; test files that use it are listed. Then a checklist
+   pass: is the UI covered, is everything wired end to end, are edge cases handled. Suggestions naming files that
+   don't exist are marked *(not in this project)*.
+5. **Write-up:** the steps come straight from the findings in code, so none can be dropped or invented; the model
+   only writes the goal, assumptions, risks and how to verify. The checks are listed at the end (✓ / ⚠).
+
+The page shows each step as it runs. Plans take about 15 seconds on the sample project, and longer on bigger ones.
+Settings → Local model → **Plans** switches to the old one-pass plan (`--quick` in the terminal). `ask_local` with
+`plan: true` uses step-by-step too, so Claude can ask your local model for a checked plan.
+
+On the sample task app: "undo a ticked-off todo" and "rename a task" each gave a complete plan (store function,
+page button or field, server route). "Show how many tasks are left" found the right places, but one step was
+muddled; the checks flagged it (an unused new function, missing wiring) rather than letting it pass.
 
 #### Implement with Claude
 

@@ -12,6 +12,10 @@ import { routePrompt } from "./router.mjs";
 import { runClaude } from "./claude-run.mjs";
 import { usage } from "./usage.mjs";
 import { projectContext } from "./context.mjs";
+import { planAndLog } from "./planner.mjs";
+
+// Live progress of step-by-step plans, by an id the page picks.
+const progress = new Map();
 
 // How the smart router decided, stored on the prompt's log entry so the UI can show it.
 function routeMeta(route) {
@@ -57,6 +61,9 @@ async function route(req, res, url) {
   }
   if (req.method === "GET" && pathname === "/api/config") return send(res, 200, { ...effectiveConfig(), startDir });
   if (req.method === "GET" && pathname === "/api/projects") return send(res, 200, allProjects(startDir));
+  if (req.method === "GET" && pathname === "/api/progress") {
+    return send(res, 200, progress.get(String(url.searchParams.get("id") || "")) || {});
+  }
   if (req.method === "GET" && pathname === "/api/usage") return send(res, 200, usage(url.searchParams.get("range") || "7d"));
   if (req.method === "GET" && pathname === "/api/launch-options") {
     return send(res, 200, { claudeModels: CLAUDE_MODELS, startModes: START_MODES, effortLevels: EFFORT_LEVELS });
@@ -80,6 +87,23 @@ async function route(req, res, url) {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
       const started = Date.now();
       const dir = projectParam(body.project);
+      // Step-by-step plans: many small questions plus checks (planner.mjs), with progress the page can poll.
+      if (body.plan === true && body.stepwise === true) {
+        const id = String(body.progressId || "").slice(0, 64);
+        try {
+          const out = await planAndLog({
+            dir,
+            prompt: body.prompt,
+            model: body.model || undefined,
+            useHistory: body.useHistory !== false,
+            meta: routeMeta(body.route),
+            onProgress: (text) => id && progress.set(id, { text, at: Date.now() }),
+          });
+          return send(res, 200, { ...out, ms: Date.now() - started });
+        } finally {
+          progress.delete(id);
+        }
+      }
       // Project-aware: gather relevant code on this machine so the local model works from real names.
       let context = null;
       if (body.projectContext === true) {

@@ -4,6 +4,7 @@
 import readline from "node:readline/promises";
 import { chat, loadLog, logPath, projectDir, DEFAULT_MODEL } from "./lib.mjs";
 import { projectContext } from "./context.mjs";
+import { planAndLog } from "./planner.mjs";
 
 const model = process.argv.slice(2).find((a) => !a.startsWith("--")) || DEFAULT_MODEL;
 const log = loadLog();
@@ -27,6 +28,12 @@ for (;;) {
     continue;
   }
   try {
+    if (plan && !process.argv.includes("--quick")) {
+      // Step-by-step: many small questions about the real code, then checks. --quick for the one-pass plan.
+      const { reply } = await planAndLog({ prompt: line, model, onProgress: (t) => console.log(`  … ${t}`) });
+      console.log(`\n${model}> ${reply}\n`);
+      continue;
+    }
     // Plans get relevant project code attached, so the model uses real file and function names.
     let context = null;
     if (plan) {

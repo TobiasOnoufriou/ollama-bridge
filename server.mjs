@@ -2,6 +2,7 @@
 // Minimal MCP stdio server (newline-delimited JSON-RPC) exposing a local Ollama model to Claude Code.
 import readline from "node:readline";
 import { chat, listModels, loadLog, saveLog, logPath, projectDir, DEFAULT_MODEL, REASONING_MODEL } from "./lib.mjs";
+import { planAndLog } from "./planner.mjs";
 
 // These descriptions load into every Claude Code session on the machine, so keep them short.
 const TOOLS = [
@@ -54,6 +55,15 @@ function historyText(messages) {
 async function callTool(name, args = {}) {
   switch (name) {
     case "ask_local": {
+      if (args.plan === true) {
+        // Plans go through the step-by-step planner, which reads this project's code itself.
+        const { reply, model } = await planAndLog({
+          prompt: args.prompt,
+          model: args.model || undefined,
+          useHistory: args.use_history !== false,
+        });
+        return `[${model}, step-by-step plan]\n${reply}`;
+      }
       const { reply, model } = await chat({
         from: "claude",
         prompt: args.prompt,
