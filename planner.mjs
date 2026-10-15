@@ -11,7 +11,7 @@
 //   5. Write-up    the findings become the plan; anything the checks flagged is listed at the end
 // Every call returns JSON forced to a schema (Ollama structured outputs), so replies can't be malformed.
 import path from "node:path";
-import { OLLAMA_URL, DEFAULT_MODEL, loadLog, saveLog, projectDir } from "./lib.mjs";
+import { OLLAMA_URL, DEFAULT_MODEL, loadLog, saveLog, projectDir, defaultSub } from "./lib.mjs";
 import { updateIndex, outlineText, pickFiles, definition, readText, cut } from "./context.mjs";
 
 const FILE_CHARS = 12000; // what one per-file question sees
@@ -324,15 +324,15 @@ export async function stepwisePlan({ dir = projectDir(), request, model = DEFAUL
 }
 
 // Plan and record it in the shared log like any local reply (the code it read isn't stored, just the file list).
-export async function planAndLog({ dir = projectDir(), prompt, model = DEFAULT_MODEL, useHistory = true, meta = {}, onProgress }) {
-  const log = loadLog(dir);
+export async function planAndLog({ dir = projectDir(), sub = defaultSub(), prompt, model = DEFAULT_MODEL, useHistory = true, meta = {}, onProgress }) {
+  const log = loadLog(dir, sub);
   const entry = { from: "human", content: prompt, ts: new Date().toISOString(), mode: "plan", ...meta };
   const r = await stepwisePlan({ dir, request: prompt, model, history: useHistory ? log.messages : [], onProgress });
-  const fresh = loadLog(dir);
+  const fresh = loadLog(dir, sub);
   fresh.messages.push(
     { ...entry, context: r.sources },
     { from: "local", model, content: r.plan, ts: new Date().toISOString(), mode: "plan", stepwise: true, usage: r.usage },
   );
-  saveLog(fresh, dir);
+  saveLog(fresh, dir, sub);
   return { reply: r.plan, model, usage: r.usage, checks: r.checks };
 }

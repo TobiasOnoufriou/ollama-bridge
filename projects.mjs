@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { HERE } from "./config.mjs";
-import { listProjects, logPath } from "./lib.mjs";
+import { listProjects, logPath, sessionsDir, sessionCount } from "./lib.mjs";
 
 const STORE = path.join(HERE, "projects.json");
 const IS_WIN = process.platform === "win32";
@@ -66,7 +66,7 @@ export function allProjects(current = process.cwd()) {
   if (current) put(current, { current: true });
   return [...byKey.entries()]
     .filter(([k]) => !hidden.has(k))
-    .map(([, p]) => ({ added: false, current: false, ...p, exists: isDir(p.project) }))
+    .map(([, p]) => ({ added: false, current: false, ...p, sessions: sessionCount(p.project), exists: isDir(p.project) }))
     .sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || String(b.updated).localeCompare(String(a.updated)) || a.project.localeCompare(b.project));
 }
 
@@ -86,7 +86,10 @@ export function removeProject(input, { deleteHistory = false } = {}) {
   store.added = store.added.filter((p) => key(p) !== key(dir));
   if (!store.hidden.some((p) => key(p) === key(dir))) store.hidden.push(dir);
   saveStore(store);
-  if (deleteHistory) fs.rmSync(logPath(dir), { force: true });
+  if (deleteHistory) {
+    fs.rmSync(logPath(dir, ""), { force: true });
+    fs.rmSync(sessionsDir(dir), { recursive: true, force: true });
+  }
   return dir;
 }
 

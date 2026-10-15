@@ -215,7 +215,8 @@ export async function reviewChanges({ dir, plan, changes, after, model = DEFAULT
 const reviewMarkdown = (title, lines) => `**${title}**\n${lines.map((l) => `- ${l.ok ? "✓" : "⚠"} ${l.text}`).join("\n")}`;
 
 // The whole loop. opts: Claude options (model, effort, fast); reviewMode: "fix" (review, fix once) | "review" | "off".
-export async function implementAndReview({ dir, planMessage, opts = {}, reviewMode = "fix", reviewModel = DEFAULT_MODEL, onProgress = () => {} }) {
+// sub: the sub-session the plan is in; Claude's runs and the review are logged there.
+export async function implementAndReview({ dir, sub = "", planMessage, opts = {}, reviewMode = "fix", reviewModel = DEFAULT_MODEL, onProgress = () => {} }) {
   dir = path.resolve(dir);
   const plan = planMessage.content;
   const before = reviewMode === "off" ? null : snapshot(dir);
@@ -223,6 +224,7 @@ export async function implementAndReview({ dir, planMessage, opts = {}, reviewMo
   onProgress("Claude Code is implementing the plan");
   const impl = await runClaude({
     dir,
+    sub,
     prompt:
       "Carry out this plan, written by a local model from excerpts of this project. Check file and function names " +
       "against the real code first; where the plan is wrong or incomplete, follow the code and say what you changed. " +
@@ -243,13 +245,14 @@ export async function implementAndReview({ dir, planMessage, opts = {}, reviewMo
   let fix = null, recheck = null;
 
   const verdict = review.problems.length ? `${review.problems.length} problem${review.problems.length === 1 ? "" : "s"} found` : "everything checks out";
-  postLocal(dir, reviewModel, `${reviewMarkdown(`Review of Claude's changes: ${verdict}`, review.lines)}${
+  postLocal(dir, sub, reviewModel, `${reviewMarkdown(`Review of Claude's changes: ${verdict}`, review.lines)}${
     review.problems.length && reviewMode === "fix" ? "\n\nSending these to Claude to fix (one round)." : ""}`, total);
 
   if (review.problems.length && reviewMode === "fix") {
     onProgress(`Claude Code is fixing ${review.problems.length} problem${review.problems.length === 1 ? "" : "s"}`);
     fix = await runClaude({
       dir,
+      sub,
       prompt:
         "A review of the changes you just made for the plan found these problems. Fix only these, then reply with " +
         `a one-line summary per fix. If one is a false alarm, say why instead of changing code.\n\n${review.problems.map((p, i) => `${i + 1}. ${p}`).join("\n")}`,
@@ -278,13 +281,13 @@ export async function implementAndReview({ dir, planMessage, opts = {}, reviewMo
     const missing = planSteps(plan).filter((s) => s.file && !again.changes.some((c) => c.rel === s.file || c.rel.endsWith(`/${s.file}`)));
     lines.push(missing.length ? { ok: false, text: `Planned files still unchanged: ${missing.map((s) => s.file).join(", ")}` } : { ok: true, text: "Every planned file was changed" });
     recheck = lines;
-    postLocal(dir, reviewModel, reviewMarkdown("Re-check after Claude's fix", lines), { in: 0, out: 0, ms: 0 });
+    postLocal(dir, sub, reviewModel, reviewMarkdown("Re-check after Claude's fix", lines), { in: 0, out: 0, ms: 0 });
   }
   return { impl, review, fix, recheck };
 }
 
-function postLocal(dir, model, content, usage) {
-  const log = loadLog(dir);
+function postLocal(dir, sub, model, content, usage) {
+  const log = loadLog(dir, sub);
   log.messages.push({ from: "local", model, content, ts: new Date().toISOString(), mode: "review", usage });
-  saveLog(log, dir);
+  saveLog(log, dir, sub);
 }

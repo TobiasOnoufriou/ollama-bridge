@@ -33,23 +33,107 @@ export function projectDir() {
   return path.resolve(process.env.OLLAMA_BRIDGE_PROJECT || process.cwd());
 }
 
-export function logPath(dir = projectDir()) {
-  const key = dir.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(-120) || "root";
-  return path.join(HERE, "logs", `${key}.json`);
+// Sub-sessions: a project can hold several separate conversations, each with its own log and its own resumed
+// Claude session. "sub" is the sub-session id; "" (or "main") is the project's original log.
+const SUB_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+export function subId(value) {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (!v || v === "main") return "";
+  if (!SUB_RE.test(v)) throw new Error(`Invalid session name: ${value} (use a-z, 0-9 and -, up to 40 characters)`);
+  return v;
 }
 
-export function loadLog(dir = projectDir()) {
+// The sub-session from OLLAMA_BRIDGE_SESSION (set by --sub and by terminals opened for a sub-session).
+export function defaultSub() {
+  return subId(process.env.OLLAMA_BRIDGE_SESSION);
+}
+
+const logKey = (dir) => dir.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(-120) || "root";
+
+// Folder of a project's sub-session logs. listProjects() only reads the top level of logs/, so these never show up as projects.
+export function sessionsDir(dir = projectDir()) {
+  return path.join(HERE, "logs", "sessions", logKey(dir));
+}
+
+export function logPath(dir = projectDir(), sub = defaultSub()) {
+  sub = subId(sub);
+  return sub ? path.join(sessionsDir(dir), `${sub}.json`) : path.join(HERE, "logs", `${logKey(dir)}.json`);
+}
+
+export function loadLog(dir = projectDir(), sub = defaultSub()) {
   try {
-    return JSON.parse(fs.readFileSync(logPath(dir), "utf8"));
+    return JSON.parse(fs.readFileSync(logPath(dir, sub), "utf8"));
   } catch {
     return { project: dir, messages: [] };
   }
 }
 
-export function saveLog(log, dir = projectDir()) {
-  const file = logPath(dir);
+export function saveLog(log, dir = projectDir(), sub = defaultSub()) {
+  const file = logPath(dir, sub);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(log, null, 2));
+}
+
+// Empty a conversation, keeping a sub-session's name.
+export function clearLog(dir = projectDir(), sub = defaultSub()) {
+  const { name, created } = loadLog(dir, sub);
+  saveLog({ project: dir, ...(name ? { name, created } : {}), messages: [] }, dir, sub);
+}
+
+// Main plus every named sub-session: [{ id, name, messages, updated }], main first, then oldest first.
+export function listSessions(dir = projectDir()) {
+  const main = loadLog(dir, "");
+  const out = [{ id: "", name: "Main", messages: main.messages.length, updated: main.messages.at(-1)?.ts || null }];
+  let files = [];
+  try {
+    files = fs.readdirSync(sessionsDir(dir)).filter((f) => f.endsWith(".json") && SUB_RE.test(f.slice(0, -5)));
+  } catch {}
+  const named = files.map((f) => {
+    const id = f.slice(0, -5);
+    const log = loadLog(dir, id);
+    return { id, name: log.name || id, messages: log.messages.length, updated: log.messages.at(-1)?.ts || null, created: log.created || "" };
+  });
+  named.sort((a, b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
+  return [...out, ...named.map(({ created, ...s }) => s)];
+}
+
+export function sessionCount(dir) {
+  try {
+    return fs.readdirSync(sessionsDir(dir)).filter((f) => f.endsWith(".json")).length;
+  } catch {
+    return 0;
+  }
+}
+
+const cleanName = (name) => String(name ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+
+// New sub-session named `name`; its id is a slug of the name, made unique. Returns the id.
+export function createSession(dir, name) {
+  name = cleanName(name);
+  if (!name) throw new Error("Give the session a name");
+  let base = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 36).replace(/-+$/, "");
+  if (!base || base === "main") base = "session";
+  let id = base;
+  for (let n = 2; fs.existsSync(logPath(dir, id)); n++) id = `${base}-${n}`;
+  saveLog({ project: dir, name, created: new Date().toISOString(), messages: [] }, dir, id);
+  return id;
+}
+
+export function renameSession(dir, sub, name) {
+  sub = subId(sub);
+  name = cleanName(name);
+  if (!sub) throw new Error("The main conversation can't be renamed");
+  if (!name) throw new Error("Give the session a name");
+  if (!fs.existsSync(logPath(dir, sub))) throw new Error(`No session called ${sub}`);
+  const log = loadLog(dir, sub);
+  log.name = name;
+  saveLog(log, dir, sub);
+}
+
+export function deleteSession(dir, sub) {
+  sub = subId(sub);
+  if (!sub) throw new Error("The main conversation can't be deleted; clear it instead");
+  fs.rmSync(logPath(dir, sub), { force: true });
 }
 
 
@@ -90,8 +174,8 @@ export function listProjects() {
 // meta: extra fields stored on the prompt's log entry (e.g. how the smart router chose this model).
 // context: { text, sources } from context.mjs. The project code goes to the model with this prompt only; the log
 // keeps just the list of files used, so the shared conversation (and what Claude is later sent) stays small.
-export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true, plan = false, meta = {}, context = null, dir = projectDir() }) {
-  const log = loadLog(dir);
+export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true, plan = false, meta = {}, context = null, dir = projectDir(), sub = defaultSub() }) {
+  const log = loadLog(dir, sub);
   const entry = {
     from,
     content: prompt,
@@ -123,9 +207,9 @@ export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHis
   // Re-read before saving: Claude, local-chat and the web UI may all have written while the model was thinking.
   // Token counts and time from Ollama, for the usage panel (total_duration is in nanoseconds).
   const usage = { in: data.prompt_eval_count || 0, out: data.eval_count || 0, ms: Math.round((data.total_duration || 0) / 1e6) };
-  const fresh = loadLog(dir);
+  const fresh = loadLog(dir, sub);
   fresh.messages.push(entry, { from: "local", model, content: reply, ts: new Date().toISOString(), usage, ...(plan ? { mode: "plan" } : {}) });
-  saveLog(fresh, dir);
+  saveLog(fresh, dir, sub);
   return { reply, model, usage };
 }
 

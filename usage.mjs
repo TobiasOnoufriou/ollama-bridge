@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { listProjects, loadLog } from "./lib.mjs";
+import { listProjects, listSessions, loadLog } from "./lib.mjs";
 
 const PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
 const RANGES = { "5h": 5 * 3600e3, today: null, "7d": 7 * 86400e3, "30d": 30 * 86400e3 };
@@ -141,8 +141,8 @@ export function bridgeUsage(range = "7d") {
   const from = since(range);
   const out = { localReplies: 0, in: 0, out: 0, ms: 0, handedOff: 0, smartLocal: 0, smartClaude: 0, claudeRuns: 0, claudeCostUsd: 0, byModel: [] };
   const byModel = new Map();
-  for (const p of listProjects()) {
-    const msgs = loadLog(p.project).messages;
+  const logs = listProjects().flatMap((p) => listSessions(p.project).map((s) => loadLog(p.project, s.id).messages));
+  for (const msgs of logs) {
     msgs.forEach((m, i) => {
       if ((Date.parse(m.ts) || 0) < from) return;
       if (m.from === "local") {
