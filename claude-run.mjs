@@ -52,12 +52,95 @@ function stop(child) {
   else child.kill();
 }
 
-async function runOnce(args, input, dir, env) {
+// Lines of a Claude edit, minus the unchanged lines at either end of old_string/new_string.
+function lineDelta(before = "", after = "") {
+  const a = before ? before.split("\n") : [], b = after ? after.split("\n") : [];
+  let s = 0;
+  while (s < a.length && s < b.length && a[s] === b[s]) s++;
+  let e = 0;
+  while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
+  return { added: b.length - s - e, removed: a.length - s - e };
+}
+
+// Follows the stream-json events of a run: what Claude is doing right now (for progress) and which files its
+// Edit/Write calls changed. Changes count only once the tool result comes back without an error (an edit can be
+// refused or fail to match). Shell commands in Auto mode can change files too; those aren't seen here.
+function tracker(dir, onProgress) {
+  const pending = new Map(); // tool_use id -> { file, how, added, removed }
+  const changes = new Map(); // relative path -> { file, how, added, removed }
+  let actions = 0;
+  const rel = (p) => {
+    const r = path.relative(dir, path.resolve(dir, String(p || "")));
+    return (r && !r.startsWith("..") && !path.isAbsolute(r) ? r : String(p || "")).split(path.sep).join("/");
+  };
+  const summary = () => `${actions} action${actions === 1 ? "" : "s"}${changes.size ? `, ${changes.size} file${changes.size === 1 ? "" : "s"} changed` : ""}`;
+  const describe = (name, input = {}) => {
+    const file = input.file_path || input.notebook_path;
+    if (name === "Read") return `reading ${rel(file)}`;
+    if (["Edit", "MultiEdit", "Write", "NotebookEdit"].includes(name)) return `${name === "Write" ? "writing" : "editing"} ${rel(file)}`;
+    if (name === "Grep") return `searching for "${String(input.pattern || "").slice(0, 40)}"`;
+    if (name === "Glob") return `looking for ${String(input.pattern || "").slice(0, 40)}`;
+    if (name === "Bash") return "running a command";
+    return `using ${name}`;
+  };
+  const onEvent = (ev) => {
+    for (const block of Array.isArray(ev.message?.content) ? ev.message.content : []) {
+      if (ev.type === "assistant" && block.type === "tool_use") {
+        actions++;
+        onProgress(`${describe(block.name, block.input)} (${summary()})`);
+        const input = block.input || {};
+        let delta = null;
+        if (block.name === "Edit") delta = lineDelta(input.old_string, input.new_string);
+        else if (block.name === "MultiEdit") {
+          delta = (input.edits || []).reduce((t, e) => {
+            const d = lineDelta(e.old_string, e.new_string);
+            return { added: t.added + d.added, removed: t.removed + d.removed };
+          }, { added: 0, removed: 0 });
+        } else if (block.name === "Write") delta = lineDelta("", input.content);
+        else if (block.name === "NotebookEdit") delta = { added: 0, removed: 0 };
+        if (delta && (input.file_path || input.notebook_path)) {
+          pending.set(block.id, { file: rel(input.file_path || input.notebook_path), how: block.name === "Write" ? "written" : "edited", ...delta });
+        }
+      }
+      if (ev.type === "user" && block.type === "tool_result" && pending.has(block.tool_use_id)) {
+        const c = pending.get(block.tool_use_id);
+        pending.delete(block.tool_use_id);
+        if (block.is_error) continue;
+        const had = changes.get(c.file);
+        changes.set(c.file, had ? { ...had, added: had.added + c.added, removed: had.removed + c.removed } : c);
+      }
+    }
+  };
+  return { onEvent, changes: () => [...changes.values()] };
+}
+
+// stream-json: one JSON event per line; the last one, type "result", carries what --output-format json would.
+// onEvent sees every event; non-JSON output (e.g. an error message) is kept as text.
+async function runOnce(args, input, dir, env, onEvent = () => {}) {
   const signal = cancelSignal();
   if (signal?.aborted) return { code: null, out: "", err: "", json: null, stopped: true };
   const child = await spawnClaude(args, { cwd: path.resolve(dir), env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-  let out = "", err = "";
-  child.stdout.on("data", (d) => (out += d));
+  let out = "", err = "", buf = "", json = null;
+  const line = (l) => {
+    if (!l.trim()) return;
+    let ev;
+    try {
+      ev = JSON.parse(l);
+    } catch {
+      out += `${l}\n`;
+      return;
+    }
+    if (ev?.type === "result") json = ev;
+    try {
+      onEvent(ev);
+    } catch {}
+  };
+  child.stdout.setEncoding("utf8"); // so a character split across chunks isn't mangled
+  child.stdout.on("data", (d) => {
+    const lines = (buf + d).split("\n");
+    buf = lines.pop();
+    lines.forEach(line);
+  });
   child.stderr.on("data", (d) => (err += d));
   child.stdin.on("error", () => {}); // killed before reading its input
   child.stdin.end(input);
@@ -65,13 +148,10 @@ async function runOnce(args, input, dir, env) {
   const onStop = () => stop(child);
   signal?.addEventListener("abort", onStop, { once: true });
   const code = await new Promise((resolve) => child.once("close", resolve));
+  line(buf);
   clearTimeout(timer);
   signal?.removeEventListener("abort", onStop);
   if (signal?.aborted) return { code, out, err, json: null, stopped: true };
-  let json = null;
-  try {
-    json = JSON.parse(out);
-  } catch {}
   return { code, out, err, json };
 }
 
@@ -95,15 +175,18 @@ function spawnClaude(args, opts) {
 // Each project (and each of its sub-sessions) keeps one Claude Code session per toolset in its log, and later runs
 // resume it: the system prompt and earlier turns then come from Claude's prompt cache instead of being sent fresh.
 // autoEffort: Smart's suggestion ("low" or "medium"), used only when no effort is set.
-// Returns { reply, model, ms, costUsd, usage, isError }.
+// Returns { reply, model, ms, costUsd, usage, isError, changes }; changes ([{ file, how, added, removed }]) is also
+// stored on the reply's log entry.
 // logText: what the log shows for the prompt (e.g. a short label instead of a pasted plan).
 // sub: the sub-session ("" = main).
-export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", mode: startMode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [] }) {
+// onProgress(text): what Claude is doing right now, e.g. "editing lib.mjs (4 actions, 1 file changed)".
+export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", mode: startMode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [], onProgress = () => {} }) {
   const usedEffort = effort || (AUTO_EFFORTS.has(autoEffort) ? autoEffort : "");
   const mode = startMode || "acceptEdits";
   const profile = mode === "plan" ? "read" : mode === "acceptEdits" ? "edit" : "full";
-  // claudeArgs validates model, mode and effort.
-  const base = ["-p", "--output-format", "json", ...claudeArgs({ model, mode, effort: usedEffort, fast }), ...PROFILES[profile]];
+  // claudeArgs validates model, mode and effort. stream-json in print mode needs --verbose.
+  const base = ["-p", "--output-format", "stream-json", "--verbose", ...claudeArgs({ model, mode, effort: usedEffort, fast }), ...PROFILES[profile]];
+  const track = tracker(path.resolve(dir), onProgress);
 
   const started = Date.now();
   const entry = { from: "human", content: logText || prompt, ts: new Date().toISOString(), ...(mode === "plan" ? { mode: "plan" } : {}), ...meta };
@@ -118,13 +201,14 @@ export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", m
   const log = loadLog(dir, sub);
   const saved = useHistory ? log.claude?.[profile] : null;
   const context = (session, upTo) => (useHistory ? sharedContext(log.messages.slice(session ? upTo : 0), session, exclude) : "");
-  let r = await runOnce(saved ? [...base, "--resume", saved.session] : base, prompt + context(saved?.session, saved?.upTo), dir, env);
+  let r = await runOnce(saved ? [...base, "--resume", saved.session] : base, prompt + context(saved?.session, saved?.upTo), dir, env, track.onEvent);
   // The saved session can be gone (deleted, other machine, expired): start a new one with the full context.
   // Only for that error: a broader match (e.g. a usage-limit message) would pay for the whole prompt twice.
-  if (saved && (r.code !== 0 || r.json?.is_error) && /no conversation found|session[^.\n]{0,60}not found/i.test(`${r.err} ${r.json?.result || ""}`)) {
-    r = await runOnce(base, prompt + context(null, 0), dir, env);
+  if (saved && (r.code !== 0 || r.json?.is_error) && /no conversation found|session[^.\n]{0,60}not found/i.test(`${r.err} ${r.out} ${r.json?.result || ""}`)) {
+    r = await runOnce(base, prompt + context(null, 0), dir, env, track.onEvent);
   }
   const { code, out, err, json } = r;
+  const changes = track.changes().slice(0, 50);
 
   let reply, isError = code !== 0, costUsd = null, usage = null;
   try {
@@ -176,6 +260,7 @@ export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", m
     ts: new Date().toISOString(),
     ...tag,
     ...(usage ? { usage } : {}),
+    ...(changes.length ? { changes } : {}),
     ...(mode === "plan" ? { mode: "plan" } : {}),
     ...(isError ? { error: true } : {}),
   });
@@ -183,5 +268,5 @@ export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", m
     fresh.claude = { ...fresh.claude, [profile]: { session, upTo: fresh.messages.length, ...(sessionCost != null ? { costTotal: sessionCost } : {}) } };
   }
   saveLog(fresh, dir, sub);
-  return { reply, model: label, ms, costUsd, usage, isError, ...(r.stopped ? { stopped: true } : {}) };
+  return { reply, model: label, ms, costUsd, usage, isError, changes, ...(r.stopped ? { stopped: true } : {}) };
 }

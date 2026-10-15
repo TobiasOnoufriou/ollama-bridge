@@ -187,6 +187,12 @@ reply is added to the same conversation. There's no one to approve edits, so the
 Tick **Plan** for a read-only plan, then untick it to have Claude implement. Claude Code's CLI must be
 signed in once: run `claude` and type `/login`.
 
+**What Claude is doing.** While Claude works, the pending reply shows its current step, e.g. *Claude Code is
+working: editing lib.mjs (6 actions, 1 file changed)* (the CLI prints the same lines). When it's done, **Changed N
+files** under the reply lists each file it edited or wrote, with lines added and removed. Local models see the same
+list in the conversation history, so they know what was actually done. Only Claude's Edit and Write calls are
+counted; files changed by a shell command (Auto mode) aren't listed.
+
 **Smart effort.** When Settings → Effort is left on *Default*, Smart also picks an effort for Claude: **low** for
 a quick lookup or a short question about one file, **medium** for anything else (fixing, debugging, several
 steps). It never picks above medium; an effort you choose in Settings always wins. Replies show it, e.g.

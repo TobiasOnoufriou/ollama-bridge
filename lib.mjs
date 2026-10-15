@@ -176,7 +176,9 @@ function toOllamaMessages(entries, maxChars = MAX_HISTORY_CHARS) {
   let total = 0;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
-    const content = e.from === "local" ? e.content : `[${e.from === "claude" ? "Claude" : "Human"}] ${e.content}`;
+    // Claude's replies carry the files it changed, so local models know what was actually done.
+    const changed = e.changes?.length ? `\n(Files changed: ${e.changes.map((c) => `${c.file} +${c.added} -${c.removed}`).join(", ")})` : "";
+    const content = e.from === "local" ? e.content : `[${e.from === "claude" ? "Claude" : "Human"}] ${e.content}${changed}`;
     total += content.length;
     if (total > maxChars && out.length > 0) break;
     out.unshift({ role: e.from === "local" ? "assistant" : "user", content });

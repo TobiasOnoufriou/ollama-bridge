@@ -236,6 +236,7 @@ export async function implementAndReview({ dir, sub = "", planMessage, opts = {}
     fast: opts.fast === true,
     meta: { route: { to: "claude", reason: "implementing the local plan", by: "you" } },
     exclude: [planMessage.ts],
+    onProgress: (t) => onProgress(`Claude Code is implementing the plan: ${t}`),
   });
   if (reviewMode === "off" || impl.isError) return { impl };
 
@@ -263,6 +264,7 @@ export async function implementAndReview({ dir, sub = "", planMessage, opts = {}
       fast: opts.fast === true,
       meta: { route: { to: "claude", reason: "fixing review findings", by: "you" } },
       exclude: [reviewTs], // the problems are already in the prompt
+      onProgress: (t) => onProgress(`Claude Code is fixing: ${t}`),
     });
     // Re-check in code only (no second fix round): syntax, unused functions, and steps whose file still didn't change.
     onProgress("Re-checking after the fix");

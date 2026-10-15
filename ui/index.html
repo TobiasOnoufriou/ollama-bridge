@@ -400,6 +400,8 @@
   details.ctx summary { cursor: pointer; width: fit-content; }
   details.ctx ul { margin: 4px 0 0; padding-left: 18px; }
   details.ctx li { margin: 2px 0; }
+  details.ctx .add { color: var(--ok); }
+  details.ctx .del { color: var(--bad); }
   .msg-actions button.impl { background: var(--accent); border-color: var(--accent); color: #fff; }
 
   /* Toast */
@@ -724,6 +726,14 @@ function contextList(m) {
     m.context.map((c) => `<li><code>${esc(c.path)}${c.lines ? `:${esc(c.lines)}` : ""}</code> ${esc(c.why)}</li>`).join("")}</ul></details>`;
 }
 
+// "Changed 2 files": what Claude's Edit/Write calls changed in this reply, with lines added and removed.
+function changesList(m) {
+  if (!m.changes?.length) return "";
+  const n = m.changes.length;
+  return `<details class="ctx"><summary>Changed ${n} file${n === 1 ? "" : "s"}</summary><ul>${
+    m.changes.map((c) => `<li><code>${esc(c.file)}</code> ${esc(c.how)} <span class="add">+${Number(c.added) || 0}</span> <span class="del">−${Number(c.removed) || 0}</span></li>`).join("")}</ul></details>`;
+}
+
 function msgHtml(m, i) {
   const kind = m.from === "claude" ? "claude" : m.from === "human" ? "human" : "local";
   const name = kind === "claude" ? "Claude" : kind === "human" ? "You" : "Local model";
@@ -740,7 +750,7 @@ function msgHtml(m, i) {
   return `<div class="msg ${kind} ${m.pending ? "pending" : ""} ${m.error ? "err" : ""}" data-i="${i}">${acts}
     <div class="avatar">${letter}</div>
     <div class="bubble"><div class="who"><span class="n">${name}</span>${model}${time}${route}${usageMeta(m)}</div>
-    <div class="content">${m.pending ? esc(m.content) : renderMarkdown(m.content)}</div>${contextList(m)}</div></div>`;
+    <div class="content">${m.pending ? esc(m.content) : renderMarkdown(m.content)}</div>${contextList(m)}${changesList(m)}</div></div>`;
 }
 
 function renderMessages(scroll) {
@@ -1381,7 +1391,7 @@ async function sendMessage(override = {}) {
   const readProject = pf === "always" || (pf === "plans" && plan);
   // Step-by-step plans read the project themselves, one small question at a time, then check the result.
   const stepwise = plan && pf !== "off" && $("planStyle").value === "steps";
-  const progressId = stepwise ? Math.random().toString(36).slice(2) : "";
+  const progressId = Math.random().toString(36).slice(2);
   if (target !== "smart" && (p.tag || override.reason)) {
     mine.route = { to: target === "claude" ? "claude" : "local", reason: p.tag ? `you typed ${p.tag}` : override.reason, by: "you" };
   }
@@ -1389,14 +1399,16 @@ async function sendMessage(override = {}) {
   const pending = { from: target === "claude" ? "claude" : "local", model: target === "local" ? localModel : "", content: "", pending: true, ...(plan ? { mode: "plan" } : {}) };
   state.messages.push(pending);
   const localVerb = () => (stepwise ? "Planning step by step" : readProject ? (plan ? "Reading the project and planning" : "Reading the project") : plan ? "Planning" : "Thinking");
-  // Show which step a step-by-step plan is on.
-  const poll = stepwise ? setInterval(async () => {
+  const claudeVerb = () => (plan ? "Claude Code is planning" : "Claude Code is working");
+  // Show which step a step-by-step plan is on, or what Claude Code is doing (reading, editing, ...).
+  const poll = setInterval(async () => {
+    if (pending.from === "local" && !stepwise) return;
     try {
       const pr = await api(`/api/progress?id=${progressId}`);
-      if (pr.text && pending.from === "local") verb = pr.text;
+      if (pr.text) verb = pending.from === "claude" ? `${claudeVerb()}: ${pr.text}` : pr.text;
     } catch {}
-  }, 1000) : null;
-  let verb = target === "smart" ? "Routing" : target === "claude" ? (plan ? "Claude Code is planning" : "Claude Code is working") : localVerb();
+  }, 1000);
+  let verb = target === "smart" ? "Routing" : target === "claude" ? claudeVerb() : localVerb();
   const started = Date.now();
   const tick = () => {
     pending.content = `${verb}… ${Math.round((Date.now() - started) / 1000)}s`;
@@ -1415,7 +1427,7 @@ async function sendMessage(override = {}) {
       mine.route = route;
       pending.from = route.to === "claude" ? "claude" : "local";
       pending.model = route.to === "local" ? localModel : "";
-      verb = route.to === "claude" ? (plan ? "Claude Code is planning" : "Claude Code is working") : localVerb();
+      verb = route.to === "claude" ? claudeVerb() : localVerb();
       renderMessages(true);
       tick();
     }
@@ -1424,7 +1436,7 @@ async function sendMessage(override = {}) {
         project: state.project, sub, prompt: text, ...claudeOpts(),
         ...(override.mode ? { mode: override.mode } : {}), ...(override.effort ? { effort: override.effort } : {}),
         autoEffort: target === "smart" ? route.effort : "", plan, useHistory, route,
-        logText: override.logText || "", exclude: override.exclude || [], runId,
+        logText: override.logText || "", exclude: override.exclude || [], runId, progressId,
       });
       if (out.stopped) toast("Stopped. Claude's reply so far isn't kept, but any edits it made are");
       else if (out.isError) toast("Claude Code reported an error; see its reply", true);
@@ -1447,7 +1459,7 @@ async function sendMessage(override = {}) {
     }
   } finally {
     clearInterval(timer);
-    if (poll) clearInterval(poll);
+    clearInterval(poll);
     setRunning(false);
   }
   if (!/^(Error|Stopped)/.test(pending.content)) {

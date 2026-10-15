@@ -119,8 +119,9 @@ switch (cmd) {
         const { reply, model } = await chat({ from: "human", prompt, model: modelArg || undefined, plan, meta: { route }, context });
         console.log(`${bold(yellow(model))}\n${reply}`);
       } else {
-        const out = await runClaude({ dir: projectDir(), prompt, model: modelArg, mode: plan ? "plan" : "", effort: optArg("--effort"), autoEffort: route.effort, fast: flag("--fast"), meta: { route } });
+        const out = await runClaude({ dir: projectDir(), prompt, model: modelArg, mode: plan ? "plan" : "", effort: optArg("--effort"), autoEffort: route.effort, fast: flag("--fast"), meta: { route }, onProgress: (t) => console.log(dim(`  … ${t}`)) });
         console.log(`${bold(cyan(out.model))}${dim(` ${(out.ms / 1000).toFixed(0)}s`)}\n${out.reply}`);
+        if (out.changes.length) console.log(dim(`\nChanged: ${out.changes.map((c) => `${c.file} (+${c.added} -${c.removed})`).join(", ")}`));
         if (out.isError) process.exit(1);
       }
     } catch (err) {

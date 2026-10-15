@@ -249,6 +249,7 @@ async function route(req, res, url) {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
       const dir = projectParam(body.project);
       const sub = subParam(body.sub);
+      const id = String(body.progressId || "").slice(0, 64);
       const out = await cancellable(body.runId, `${dir}|${sub}`, () => runClaude({
         dir,
         sub,
@@ -264,7 +265,8 @@ async function route(req, res, url) {
         fast: body.fast === true,
         useHistory: body.useHistory !== false,
         meta: routeMeta(body.route),
-      }));
+        onProgress: (text) => id && progress.set(id, { text, at: Date.now() }),
+      })).finally(() => progress.delete(id));
       return send(res, 200, out);
     }
     // Stop a running request. Fine to call when it has already finished.
