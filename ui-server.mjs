@@ -10,6 +10,7 @@ import { allProjects, addProject, removeProject, isKnownProject, claudeCodeProje
 import { pickFolder, launchIn, CLAUDE_MODELS, START_MODES, EFFORT_LEVELS } from "./launch.mjs";
 import { routePrompt } from "./router.mjs";
 import { runClaude } from "./claude-run.mjs";
+import { usage } from "./usage.mjs";
 
 // How the smart router decided, stored on the prompt's log entry so the UI can show it.
 function routeMeta(route) {
@@ -55,6 +56,7 @@ async function route(req, res, url) {
   }
   if (req.method === "GET" && pathname === "/api/config") return send(res, 200, { ...effectiveConfig(), startDir });
   if (req.method === "GET" && pathname === "/api/projects") return send(res, 200, allProjects(startDir));
+  if (req.method === "GET" && pathname === "/api/usage") return send(res, 200, usage(url.searchParams.get("range") || "7d"));
   if (req.method === "GET" && pathname === "/api/launch-options") {
     return send(res, 200, { claudeModels: CLAUDE_MODELS, startModes: START_MODES, effortLevels: EFFORT_LEVELS });
   }

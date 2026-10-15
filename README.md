@@ -128,6 +128,35 @@ recent shared conversation as context, and its reply is added to the same conver
 start mode it can read but not change files (there's no one to approve edits); choose **Auto-accept edits**
 if you want it to make changes. Claude Code's CLI must be signed in once: run `claude` and type `/login`.
 
+### Usage
+
+**Usage** in the sidebar (or <kbd>Alt</kbd>+<kbd>U</kbd>) shows, for the last 5 hours, today, 7 or 30 days:
+
+- **Claude Code, every session on this PC** (desktop app, terminals, `claude -p` runs and the ones started
+  here), read from Claude Code's own session records in `~/.claude/projects`: output and input tokens,
+  tokens read from the prompt cache, replies and sessions, fast-mode replies, a per-day chart, and
+  breakdowns by model and by project. Plan limits and reset times aren't stored locally; run `/usage` in
+  Claude Code for those.
+- **Local models:** replies in this app, tasks Claude handed off with `ask_local`, how often Smart kept a
+  prompt local, tokens processed on your GPU, and replies per local model.
+
+Hover any reply to see its tokens in → out, time, and (for Claude runs) the cost Claude Code reported.
+
+### Shortcuts and tricks
+
+Press <kbd>?</kbd> (or click **Shortcuts & tricks** under the message box) for the full list.
+
+- **Per-message overrides:** start a message with `@claude`, `@local`, `@smart`, `@reason` (the reasoning
+  model), `@<model name>` (the start of the name is enough), and/or `/plan`, e.g. `@claude /plan add login`.
+- **Drop text files** on the message box to paste them in as code blocks; Smart then keeps the question local
+  because the model can see the file.
+- **↑** in an empty message box brings back your last message.
+- **Hover a message** for **Copy**, **Ask Claude instead** / **Retry locally**, and **Second opinion** (the
+  reasoning model checks the answer).
+- **Keys:** <kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>/</kbd> jump to the message box; <kbd>Alt</kbd>+<kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd>
+  Local / Smart / Claude; <kbd>Alt</kbd>+<kbd>P</kbd> plan mode; <kbd>Alt</kbd>+<kbd>S</kbd> settings;
+  <kbd>Alt</kbd>+<kbd>U</kbd> usage; <kbd>Alt</kbd>+<kbd>N</kbd> add a project.
+
 ### Plan mode for the local models
 
 Tick **Plan** next to Send (or use `ollama-bridge chat --plan` / `/plan`) and the model replies with a plan

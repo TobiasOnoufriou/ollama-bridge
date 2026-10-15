@@ -71,12 +71,22 @@ export async function runClaude({ dir, prompt, model = "", mode = "", effort = "
   const code = await new Promise((resolve) => child.once("close", resolve));
   clearTimeout(timer);
 
-  let reply, isError = code !== 0, costUsd = null;
+  let reply, isError = code !== 0, costUsd = null, usage = null;
   try {
     const j = JSON.parse(out);
     reply = j.result ?? "";
     isError = isError || !!j.is_error;
     costUsd = j.total_cost_usd ?? null;
+    const u = j.usage || {};
+    usage = {
+      in: u.input_tokens || 0,
+      out: u.output_tokens || 0,
+      cacheRead: u.cache_read_input_tokens || 0,
+      cacheWrite: u.cache_creation_input_tokens || 0,
+      ms: j.duration_ms || 0,
+      turns: j.num_turns || 0,
+      ...(costUsd != null ? { costUsd } : {}),
+    };
   } catch {
     reply = out.trim() || err.trim() || `Claude Code exited with code ${code}`;
   }
@@ -94,8 +104,9 @@ export async function runClaude({ dir, prompt, model = "", mode = "", effort = "
     model: label,
     content: reply,
     ts: new Date().toISOString(),
+    ...(usage ? { usage } : {}),
     ...(mode === "plan" ? { mode: "plan" } : {}),
     ...(isError ? { error: true } : {}),
   });
-  return { reply, model: label, ms, costUsd, isError };
+  return { reply, model: label, ms, costUsd, usage, isError };
 }

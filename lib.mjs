@@ -115,10 +115,12 @@ export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHis
   const reply = (data.message?.content || "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
   // Re-read before saving: Claude, local-chat and the web UI may all have written while the model was thinking.
+  // Token counts and time from Ollama, for the usage panel (total_duration is in nanoseconds).
+  const usage = { in: data.prompt_eval_count || 0, out: data.eval_count || 0, ms: Math.round((data.total_duration || 0) / 1e6) };
   const fresh = loadLog(dir);
-  fresh.messages.push(entry, { from: "local", model, content: reply, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) });
+  fresh.messages.push(entry, { from: "local", model, content: reply, ts: new Date().toISOString(), usage, ...(plan ? { mode: "plan" } : {}) });
   saveLog(fresh, dir);
-  return { reply, model };
+  return { reply, model, usage };
 }
 
 export async function listModels() {

@@ -47,9 +47,12 @@ function mentionsProjectFile(prompt, dir) {
 const FILE_RE = /\b[\w\-\/\\.]*\w\.(m?[jt]sx?|cjs|py|rb|go|rs|java|kt|cs|cpp|cc|c|h|hpp|php|swift|vue|svelte|html?|css|scss|json|ya?ml|toml|md|sql|sh|ps1|cmd|bat|ini|env|lock|xml|gradle|csproj|sln)\b/i;
 
 function byRules(prompt, dir) {
-  const file = dir && mentionsProjectFile(prompt, dir);
+  // Pasted code (a fenced block, and a "name.js:" label right above it, as the web UI adds for dropped files)
+  // is already in the prompt, so it doesn't count as asking about a file.
+  const outsideCode = prompt.replace(/(^|\n)[^\n`]*:[ \t]*\n```[\s\S]*?```/g, "\n").replace(/```[\s\S]*?```/g, "");
+  const file = dir && mentionsProjectFile(outsideCode, dir);
   if (file) return { route: "claude", reason: `mentions ${file} in this project` };
-  const named = prompt.replace(/```[\s\S]*?```/g, "").match(FILE_RE);
+  const named = outsideCode.match(FILE_RE);
   if (named) return { route: "claude", reason: `asks about ${named[0]}, which the local model can't open` };
   if (prompt.length > 2500) return { route: "claude", reason: "long, detailed request" };
   const hint = CLAUDE_HINTS.find((re) => re.test(prompt));

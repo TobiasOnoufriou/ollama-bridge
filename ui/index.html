@@ -293,6 +293,55 @@
   .check-line input { margin-top: 3px; }
   .check-line input:disabled + span { color: var(--muted); }
 
+  /* Usage panel */
+  .usage-dlg { width: min(760px, calc(100vw - 32px)); }
+  .usage-dlg .dlg-head { gap: 12px; flex-wrap: wrap; }
+  .usage-dlg .dlg-head h2 { flex: 1; }
+  .range { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .range button { border: none; border-radius: 0; padding: 4px 10px; font-size: 12px; background: transparent; color: var(--muted); }
+  .range button + button { border-left: 1px solid var(--border); }
+  .range button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .usage-dlg h3 { font-size: 14px; margin: 18px 0 4px; }
+  .usage-dlg h3 small { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 10px 0; }
+  .tile { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+  .tile .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .tile .l { font-size: 12px; color: var(--muted); }
+  .bars { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 120px; padding-top: 6px;
+    border-bottom: 1px solid var(--border); }
+  .bars .b { flex: 1; min-width: 4px; background: var(--accent); border-radius: 4px 4px 0 0; position: relative; cursor: default; }
+  .bars .b.zero { background: var(--border); height: 1px !important; border-radius: 0; }
+  .bars .hit { position: absolute; inset: -6px -1px 0; }
+  .bars .b:hover { filter: brightness(1.15); }
+  .bar-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .chart-tip {
+    position: fixed; pointer-events: none; z-index: 20; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+  table.ulist { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+  table.ulist td { padding: 5px 4px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  table.ulist td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
+  table.ulist td.name { max-width: 0; width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.ulist .ibar { height: 6px; border-radius: 3px; background: var(--accent); min-width: 2px; }
+  .muted-note { color: var(--muted); font-size: 12px; margin-top: 8px; line-height: 1.5; }
+  .usage-meta { font-size: 11px; color: var(--muted); margin-left: 8px; font-weight: 400; opacity: 0; transition: opacity .15s; }
+  .msg:hover .usage-meta { opacity: 1; }
+
+  /* Hover actions, drop target, shortcuts */
+  .msg { position: relative; }
+  .msg-actions { position: absolute; top: -4px; right: 0; display: none; gap: 4px; }
+  .msg:hover .msg-actions, .msg:focus-within .msg-actions { display: flex; }
+  .msg-actions button { padding: 2px 8px; font-size: 11px; background: var(--panel); box-shadow: var(--shadow); }
+  @media (hover: none) { .msg-actions { position: static; display: flex; margin-top: 4px; order: 3; } }
+  .composer.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
+  .linkish { all: unset; cursor: pointer; color: var(--accent); margin-left: 6px; }
+  .linkish:hover { text-decoration: underline; }
+  .keys-dlg { width: min(600px, calc(100vw - 32px)); }
+  .keys-dlg h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  table.keys { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.keys td { padding: 6px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.keys td:first-child { white-space: nowrap; width: 1%; padding-right: 14px; }
+
   /* Toast */
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0;
@@ -319,6 +368,9 @@
     <button class="add-btn" id="addProjectBtn" title="Add a project folder">+ Add</button>
   </div>
   <div id="projects"></div>
+  <button class="status-btn" id="usageBtn" title="Claude Code and local model usage (Ctrl+U)">
+    <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 13.5h11M4 11V8M7 11V4.5M10 11V6.5M13 11V3"/></svg>
+    <span id="usageText">Usage</span></button>
   <button class="status-btn" id="statusBtn"><span class="dot" id="statusDot"></span><span id="statusText">Checking setup…</span></button>
 </aside>
 
@@ -360,7 +412,8 @@
         <input type="checkbox" id="planMode"><span>Plan</span></label>
       <button class="primary" id="sendBtn">Send</button>
     </div>
-    <div class="hint">Enter to send, Shift+Enter for a new line. Claude sees this conversation through <code>local_history</code>.</div>
+    <div class="hint">Enter to send, Shift+Enter for a new line. Claude sees this conversation through <code>local_history</code>.
+      <button class="linkish" id="keysBtn" title="Shortcuts and tricks (?)">Shortcuts &amp; tricks</button></div>
   </div>
 </main>
 
@@ -379,6 +432,43 @@
     <div class="section-label">Recent Claude Code folders</div>
     <div id="suggestions"></div>
   </div>
+</dialog>
+
+<dialog id="keysDlg" class="keys-dlg">
+  <div class="dlg-head"><h2>Shortcuts &amp; tricks</h2><button class="ghost" id="closeKeys">Close</button></div>
+  <div class="dlg-body">
+    <h3>In a message</h3>
+    <table class="keys">
+      <tr><td><code>@claude</code> <code>@local</code> <code>@smart</code></td><td>send just this message there, whatever the switch says</td></tr>
+      <tr><td><code>@reason</code></td><td>ask the reasoning model (DeepSeek R1 unless you changed it) for this message</td></tr>
+      <tr><td><code>@qwen3.6</code>, <code>@deepseek</code>…</td><td>use any installed model by name (the start of the name is enough)</td></tr>
+      <tr><td><code>/plan</code></td><td>plan mode for this message only; combine them: <code>@claude /plan add login</code></td></tr>
+      <tr><td>Drop files on the box</td><td>pastes text files in as code blocks, so the local model can see them</td></tr>
+      <tr><td><kbd>↑</kbd> in an empty box</td><td>brings back your last message, like a terminal</td></tr>
+      <tr><td>Hover a message</td><td><b>Copy</b>, <b>Ask Claude instead</b> / <b>Retry locally</b>, <b>Second opinion</b>; hover also shows tokens and time</td></tr>
+    </table>
+    <h3>Keys</h3>
+    <table class="keys">
+      <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>/</kbd></td><td>jump to the message box</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>send to Local / Smart / Claude</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>P</kbd></td><td>plan mode on/off</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>S</kbd></td><td>settings</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>U</kbd></td><td>usage</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>N</kbd></td><td>add a project</td></tr>
+      <tr><td><kbd>?</kbd></td><td>this list</td></tr>
+    </table>
+  </div>
+</dialog>
+
+<dialog id="usageDlg" class="usage-dlg">
+  <div class="dlg-head">
+    <h2>Usage</h2>
+    <div class="range" role="tablist" aria-label="Time range">
+      <button data-range="5h">5 hours</button><button data-range="today">Today</button><button data-range="7d">7 days</button><button data-range="30d">30 days</button>
+    </div>
+    <button class="ghost" id="closeUsage">Close</button>
+  </div>
+  <div class="dlg-body" id="usageBody"><div class="muted-note">Loading…</div></div>
 </dialog>
 
 <dialog id="settingsDlg" class="settings-dlg">
@@ -508,16 +598,34 @@ function renderProjects() {
     </div>`).join("");
 }
 
-function msgHtml(m) {
+// Compact numbers: 1234 -> 1.2k, 2500000 -> 2.5M
+const fmt = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n || 0));
+// Shown when hovering a reply: tokens in -> out, time, and Claude Code's reported cost.
+function usageMeta(m) {
+  const u = m.usage;
+  if (!u) return "";
+  const bits = [`${fmt((u.in || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0))} → ${fmt(u.out || 0)} tokens`];
+  if (u.ms) bits.push(`${(u.ms / 1000).toFixed(1)}s`);
+  if (u.turns > 1) bits.push(`${u.turns} turns`);
+  if (u.costUsd) bits.push(`~$${u.costUsd.toFixed(u.costUsd < 0.1 ? 3 : 2)}`);
+  return `<span class="usage-meta">${bits.join(" · ")}</span>`;
+}
+
+function msgHtml(m, i) {
   const kind = m.from === "claude" ? "claude" : m.from === "human" ? "human" : "local";
   const name = kind === "claude" ? "Claude" : kind === "human" ? "You" : "Local model";
   const letter = kind === "claude" ? "C" : kind === "human" ? "Y" : "L";
   const time = m.ts ? `<time>${new Date(m.ts).toLocaleString()}</time>` : "";
   const model = (m.model ? `<span class="model">${esc(m.model)}</span>` : "") + (m.mode === "plan" ? '<span class="badge-plan">Plan</span>' : "");
   const route = m.route ? `<span class="route-chip to-${m.route.to}" title="${esc(m.route.by === "you" ? "Chosen by you" : m.route.by === "rules" ? "Decided by a rule" : "Decided by the local classifier")}">${m.route.by === "you" ? "→" : "Smart →"} <b>${m.route.to === "claude" ? "Claude" : "Local"}</b> · ${esc(m.route.reason)}</span>` : "";
-  return `<div class="msg ${kind} ${m.pending ? "pending" : ""} ${m.error ? "err" : ""}">
+  const acts = m.pending ? "" : `<div class="msg-actions">
+      <button data-act="copy" title="Copy this message">Copy</button>
+      ${kind !== "human" ? `<button data-act="${kind === "claude" ? "local" : "claude"}" title="Send the same prompt to ${kind === "claude" ? "the local model" : "Claude Code"}">${kind === "claude" ? "Retry locally" : "Ask Claude instead"}</button>
+      <button data-act="second" title="Ask the reasoning model to check this answer">Second opinion</button>` : ""}
+    </div>`;
+  return `<div class="msg ${kind} ${m.pending ? "pending" : ""} ${m.error ? "err" : ""}" data-i="${i}">${acts}
     <div class="avatar">${letter}</div>
-    <div class="bubble"><div class="who"><span class="n">${name}</span>${model}${time}${route}</div>
+    <div class="bubble"><div class="who"><span class="n">${name}</span>${model}${time}${route}${usageMeta(m)}</div>
     <div class="content">${m.pending ? esc(m.content) : renderMarkdown(m.content)}</div></div></div>`;
 }
 
@@ -726,6 +834,7 @@ async function loadHistory(scroll = false) {
   if (log.messages.length === state.lastCount && !scroll) return;
   state.lastCount = log.messages.length;
   state.messages = log.messages;
+  if (!state.lastSent) state.lastSent = [...log.messages].reverse().find((m) => m.from === "human")?.content || "";
   renderMessages(scroll);
 }
 
@@ -834,18 +943,51 @@ function setTarget(t) {
     : t === "claude" ? "Ask Claude Code about this project…" : t === "smart" ? "Ask anything; Smart picks local or Claude…" : "Message the local model…";
 }
 
-async function sendMessage() {
-  const text = $("input").value.trim();
-  if (!text || state.sending || !state.project) return;
-  const target = getTarget();
-  const localModel = $("model").value;
-  const plan = $("planMode").checked;
+// Hidden trick: start a message with @claude, @local, @smart, @reason (the reasoning model), @<model name>
+// and/or /plan to override the switch and model for that one message.
+function parsePrefixes(raw) {
+  let text = raw, target = null, model = null, plan = false, tag = null, m;
+  while ((m = text.match(/^\s*(@[\w.:\-\/]+|\/plan)\b\s*/i))) {
+    const tok = m[1].toLowerCase();
+    if (tok === "/plan") plan = true;
+    else if (tok === "@claude" || tok === "@local" || tok === "@smart") { target = tok.slice(1); tag = m[1]; }
+    else if (tok === "@reason" || tok === "@reasoning" || tok === "@deepseek") { target = "local"; model = state.config?.reasoningModel || "deepseek-r1:14b"; tag = m[1]; }
+    else {
+      const want = m[1].slice(1).toLowerCase();
+      const opts = [...$("model").options].map((o) => o.value);
+      const lc = (v) => v.toLowerCase();
+      // Exact name (with or without :latest) beats a partial match.
+      const opt = opts.find((v) => lc(v) === want || lc(v) === `${want}:latest`) || opts.find((v) => lc(v).startsWith(want));
+      if (!opt) break; // not a model: leave "@something" in the message
+      target = "local"; tag = m[1];
+      model = opt;
+    }
+    text = text.slice(m[0].length);
+  }
+  return { text: text.trim(), target, model, plan, tag };
+}
+
+// override: { text, target, model, plan } from retry buttons; otherwise read from the composer.
+async function sendMessage(override = {}) {
+  if (override instanceof Event) override = {};
+  const raw = (override.text ?? $("input").value).trim();
+  if (!raw || state.sending || !state.project) return;
+  const p = parsePrefixes(raw);
+  const text = p.text;
+  if (!text) return;
+  const target = override.target || p.target || getTarget();
+  const localModel = override.model || p.model || $("model").value;
+  const plan = override.plan ?? (p.plan || $("planMode").checked);
   const useHistory = $("useHistory").checked;
   state.sending = true;
+  state.lastSent = raw;
   $("sendBtn").disabled = true;
-  $("input").value = "";
+  if (override.text === undefined) $("input").value = "";
   autosize();
   const mine = { from: "human", content: text, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) };
+  if (target !== "smart" && (p.tag || override.reason)) {
+    mine.route = { to: target === "claude" ? "claude" : "local", reason: p.tag ? `you typed ${p.tag}` : override.reason, by: "you" };
+  }
   state.messages.push(mine);
   const pending = { from: target === "claude" ? "claude" : "local", model: target === "local" ? localModel : "", content: "", pending: true, ...(plan ? { mode: "plan" } : {}) };
   state.messages.push(pending);
@@ -860,7 +1002,8 @@ async function sendMessage() {
   renderMessages(true);
   const timer = setInterval(tick, 1000);
   try {
-    let route = target === "smart" ? null : { to: target, reason: target === "claude" ? "you chose Claude" : "you chose local", by: "you" };
+    const typed = p.tag ? `you typed ${p.tag}` : null;
+    let route = target === "smart" ? null : { to: target, reason: typed || override.reason || (target === "claude" ? "you chose Claude" : "you chose local"), by: "you" };
     if (!route) {
       const r = await api("/api/route", { project: state.project, prompt: text });
       route = { to: r.route, reason: r.reason, by: r.by };
@@ -875,7 +1018,7 @@ async function sendMessage() {
       const out = await api("/api/claude", { project: state.project, prompt: text, ...claudeOpts(), plan, useHistory, route });
       if (out.isError) toast("Claude Code reported an error; see its reply", true);
     } else {
-      await api("/api/chat", { project: state.project, prompt: text, model: localModel, useHistory, plan, route: target === "smart" ? route : null });
+      await api("/api/chat", { project: state.project, prompt: text, model: localModel, useHistory, plan, route: target === "smart" || typed || override.reason ? route : null });
     }
   } catch (e) {
     pending.content = `Error: ${e.message}`;
@@ -893,6 +1036,83 @@ async function sendMessage() {
   }
   loadProjects();
 }
+
+// ---- usage panel
+let usageRange = store.get("usageRange") || "today";
+const shortPath = (p) => basename(p || "") || p || "(unknown)";
+const prettyClaude = (id) => id.replace(/^claude-/, "").replace(/-(\d+)-(\d+)$/, " $1.$2").replace(/-(\d+)$/, " $1").replace(/^\w/, (c) => c.toUpperCase());
+
+function listTable(rows, label, value, max) {
+  if (!rows.length) return `<div class="muted-note">Nothing in this range.</div>`;
+  return `<table class="ulist">${rows.map((r) => `<tr>
+    <td class="name" title="${esc(r.key)}">${esc(label(r))}</td>
+    <td style="width:35%"><div class="ibar" style="width:${Math.max(1, (value(r) / max) * 100)}%"></div></td>
+    <td class="num">${fmt(value(r))}</td></tr>`).join("")}</table>`;
+}
+
+function dayBars(days) {
+  if (!days.length) return "";
+  const max = Math.max(1, ...days.map((d) => d.out));
+  const bars = days.map((d) => {
+    const label = new Date(d.key + "T12:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+    const tip = `${label}: ${fmt(d.out)} output tokens, ${d.messages} messages`;
+    return `<div class="b ${d.out ? "" : "zero"}" style="height:${(d.out / max) * 100}%" data-tip="${esc(tip)}" aria-label="${esc(tip)}"><span class="hit"></span></div>`;
+  }).join("");
+  const first = new Date(days[0].key + "T12:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return `<h3>Output tokens per day</h3><div class="bars" role="img" aria-label="Claude output tokens per day">${bars}</div>
+    <div class="bar-axis"><span>${esc(first)}</span><span>Peak ${fmt(max)}</span><span>Today</span></div>`;
+}
+
+async function loadUsage() {
+  for (const b of document.querySelectorAll(".range button")) b.classList.toggle("on", b.dataset.range === usageRange);
+  let u;
+  try { u = await api(`/api/usage?range=${usageRange}`); }
+  catch (e) { $("usageBody").innerHTML = `<div class="muted-note error">${esc(e.message)}</div>`; return; }
+  const c = u.claude, lc = u.localViaClaudeCode, b = u.bridge;
+  const tile = (v, l) => `<div class="tile"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  const smartTotal = b.smartLocal + b.smartClaude;
+  $("usageText").textContent = `Usage · ${fmt(c.out)} out ${usageRange === "today" ? "today" : ""}`.trim();
+  $("usageBody").innerHTML = `
+    <h3>Claude Code <small>every session on this PC: desktop app, terminals and runs from here</small></h3>
+    <div class="tiles">
+      ${tile(fmt(c.out), "output tokens")}
+      ${tile(fmt(c.in + c.cacheWrite), "input tokens")}
+      ${tile(fmt(c.cacheRead), "read from cache")}
+      ${tile(c.messages, `replies · ${c.sessions} session${c.sessions === 1 ? "" : "s"}`)}
+      ${c.fastMessages ? tile(c.fastMessages, "fast mode replies") : ""}
+    </div>
+    ${dayBars(c.byDay)}
+    <h3>By model</h3>${listTable(c.byModel, (r) => prettyClaude(r.key), (r) => r.out, Math.max(1, ...c.byModel.map((r) => r.out)))}
+    <h3>By project</h3>${listTable(c.byProject, (r) => shortPath(r.key), (r) => r.out, Math.max(1, ...c.byProject.map((r) => r.out)))}
+    <div class="muted-note">Most input is re-read from Claude's prompt cache, which is cheaper and counts less towards limits.
+      For your plan's limits and reset times, run <code>/usage</code> in Claude Code.
+      ${b.claudeCostUsd ? `Runs started from this chat reported about $${b.claudeCostUsd.toFixed(2)} at API prices.` : ""}</div>
+
+    <h3>Local models <small>work kept off Claude</small></h3>
+    <div class="tiles">
+      ${tile(b.localReplies, "replies in this app")}
+      ${tile(b.handedOff, "tasks Claude handed off")}
+      ${tile(smartTotal ? `${Math.round((b.smartLocal / smartTotal) * 100)}%` : "–", `Smart kept local${smartTotal ? ` (${b.smartLocal} of ${smartTotal})` : ""}`)}
+      ${tile(fmt(b.in + b.out), "tokens on your GPU")}
+      ${lc.messages ? tile(lc.messages, "Claude Code (local) replies") : ""}
+    </div>
+    ${b.byModel.length ? `<h3>By local model</h3>${listTable(b.byModel, (r) => prettyModel(r.key), (r) => r.messages, Math.max(1, ...b.byModel.map((r) => r.messages)))}` : ""}`;
+}
+
+// Hover tooltips for the day bars.
+const tipEl = Object.assign(document.createElement("div"), { className: "chart-tip", hidden: true });
+document.body.appendChild(tipEl);
+document.addEventListener("mousemove", (e) => {
+  const bar = e.target.closest?.(".bars .b");
+  if (!bar) { tipEl.hidden = true; return; }
+  tipEl.textContent = bar.dataset.tip;
+  tipEl.hidden = false;
+  const r = tipEl.getBoundingClientRect();
+  tipEl.style.left = `${Math.min(e.clientX + 12, innerWidth - r.width - 8)}px`;
+  tipEl.style.top = `${e.clientY - r.height - 10}px`;
+});
+
+function openUsage() { $("usageDlg").showModal(); loadUsage(); }
 
 async function clearHistory() {
   if (!state.project || !confirm(`Clear the shared conversation for ${basename(state.project)}?\nClaude and the local models will forget it too.`)) return;
@@ -922,6 +1142,22 @@ $("projects").addEventListener("click", (e) => {
   loadHistory(true);
 });
 $("list").addEventListener("click", async (e) => {
+  // Hover actions on a message: copy it, retry the prompt on the other side, or get a second opinion.
+  const act = e.target.closest("[data-act]");
+  if (act) {
+    const i = Number(act.closest(".msg").dataset.i);
+    const m = state.messages[i];
+    if (act.dataset.act === "copy") {
+      try { await navigator.clipboard.writeText(m.content); toast("Copied"); } catch { toast("Copy failed", true); }
+      return;
+    }
+    const prompt = [...state.messages.slice(0, i)].reverse().find((x) => x.from === "human")?.content;
+    if (!prompt) return;
+    if (act.dataset.act === "claude") sendMessage({ text: prompt, target: "claude", reason: "retried with Claude" });
+    if (act.dataset.act === "local") sendMessage({ text: prompt, target: "local", reason: "retried locally" });
+    if (act.dataset.act === "second") sendMessage({ text: `Second opinion: is this answer right? Point out mistakes or a better approach, briefly.\n\nQuestion: ${prompt}\n\nAnswer:\n${m.content}`, target: "local", model: state.config?.reasoningModel || "deepseek-r1:14b", reason: "second opinion" });
+    return;
+  }
   const btn = e.target.closest(".copy");
   if (!btn) return;
   try {
@@ -936,6 +1172,17 @@ for (const id of ["model", "claudeModel", "effort", "localModel", "startMode"]) 
 for (const id of ["fastMode", "useHistory"]) {
   $(id).addEventListener("change", () => { store.set(id, $(id).checked ? "1" : "0"); renderSummary(); });
 }
+$("usageBtn").addEventListener("click", openUsage);
+$("keysBtn").addEventListener("click", () => $("keysDlg").showModal());
+$("closeKeys").addEventListener("click", () => $("keysDlg").close());
+$("closeUsage").addEventListener("click", () => $("usageDlg").close());
+document.querySelector(".range").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-range]");
+  if (!b) return;
+  usageRange = b.dataset.range;
+  store.set("usageRange", usageRange);
+  loadUsage();
+});
 const openSettings = () => $("settingsDlg").showModal();
 $("settingsBtn").addEventListener("click", openSettings);
 $("summary").addEventListener("click", openSettings);
@@ -952,6 +1199,49 @@ $("sendBtn").addEventListener("click", sendMessage);
 $("input").addEventListener("input", autosize);
 $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+  // Like a terminal: ↑ in an empty box brings back your last message.
+  else if (e.key === "ArrowUp" && !$("input").value && state.lastSent) {
+    e.preventDefault();
+    $("input").value = state.lastSent;
+    autosize();
+  }
+});
+
+// Drop text files on the message box to paste them in as code blocks (the local model can't open files).
+const composer = document.querySelector(".composer");
+composer.addEventListener("dragover", (e) => { e.preventDefault(); composer.classList.add("drop"); });
+composer.addEventListener("dragleave", () => composer.classList.remove("drop"));
+composer.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  composer.classList.remove("drop");
+  for (const file of e.dataTransfer.files) {
+    if (file.size > 200000) { toast(`${file.name} is over 200 KB; paste the part you need`, true); continue; }
+    const body = await file.text();
+    if (/\u0000/.test(body)) { toast(`${file.name} looks binary, skipped`, true); continue; }
+    const lang = (file.name.split(".").pop() || "").toLowerCase();
+    const t = $("input");
+    t.value += `${t.value ? "\n\n" : ""}${file.name}:\n\`\`\`${lang}\n${body.replace(/\n$/, "")}\n\`\`\`\n`;
+    autosize();
+    toast(`Added ${file.name}`);
+  }
+  $("input").focus();
+});
+
+// Keyboard shortcuts (press ? to see them).
+function isTyping(e) { return /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable; }
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.code === "KeyK") { e.preventDefault(); document.querySelectorAll("dialog[open]").forEach((d) => d.close()); $("input").focus(); return; }
+  if (e.altKey && !e.ctrlKey && !e.metaKey) {
+    const act = { Digit1: () => setTarget("local"), Digit2: () => setTarget("smart"), Digit3: () => setTarget("claude"),
+      KeyP: () => $("planMode").click(), KeyS: openSettings, KeyU: openUsage, KeyN: openAdd }[e.code];
+    if (act) { e.preventDefault(); document.querySelectorAll("dialog[open]").forEach((d) => d.close()); act(); }
+    return;
+  }
+  if (document.querySelector("dialog[open]")) return;
+  if (!isTyping(e) && (e.key === "?" || (e.key === "/" && !e.shiftKey))) {
+    e.preventDefault();
+    if (e.key === "?") $("keysDlg").showModal(); else $("input").focus();
+  }
 });
 $("clearBtn").addEventListener("click", clearHistory);
 $("actions").addEventListener("click", (e) => {
@@ -996,6 +1286,8 @@ $("closeDlg").addEventListener("click", () => $("statusDlg").close());
   setTarget(["local", "smart", "claude"].includes(store.get("target")) ? store.get("target") : "smart");
   await Promise.all([loadHistory(true), loadModels(), loadLaunchOptions()]);
   loadStatus();
+  loadUsage().catch(() => {});
+  setInterval(() => { if (!$("usageDlg").open) loadUsage().catch(() => {}); }, 60000);
   setInterval(() => loadHistory().catch(() => {}), 3000);
   setInterval(() => loadProjects().catch(() => {}), 10000);
   $("input").focus();
