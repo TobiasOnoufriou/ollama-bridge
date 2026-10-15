@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Minimal MCP stdio server (newline-delimited JSON-RPC) exposing a local Ollama model to Claude Code.
 import readline from "node:readline";
-import { chat, listModels, loadLog, saveLog, logPath, projectDir, DEFAULT_MODEL } from "./lib.mjs";
+import { chat, listModels, loadLog, saveLog, logPath, projectDir, DEFAULT_MODEL, REASONING_MODEL } from "./lib.mjs";
 
 const TOOLS = [
   {
@@ -19,7 +19,7 @@ const TOOLS = [
         model: {
           type: "string",
           description:
-            "Optional Ollama model to use instead of the default. Use \"deepseek-r1:14b\" for reasoning-heavy " +
+            `Optional Ollama model to use instead of the default. Use "${REASONING_MODEL}" for reasoning-heavy ` +
             "questions, debugging logic or second opinions (slower, verbose); keep the default for quick code tasks.",
         },
         use_history: {

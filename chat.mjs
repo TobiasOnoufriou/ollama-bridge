@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Chat with the local model yourself, in the same per-project log Claude uses.
-// Run from a project folder:  node C:\Users\space\tools\ollama-bridge\chat.mjs [model]
+// Run from a project folder:  local-chat [model]   (or: node /path/to/ollama-bridge/chat.mjs [model])
 import readline from "node:readline/promises";
 import { chat, loadLog, logPath, DEFAULT_MODEL } from "./lib.mjs";
 

@@ -1,0 +1,8 @@
+{
+  "bridgeModel": "qwen2.5-coder:14b",
+  "bridgeNumCtx": 32768,
+  "reasoningModel": "deepseek-r1:14b",
+  "claudeLocalModel": "qwen3.6",
+  "claudeLocalCtx": 65536,
+  "ollamaUrl": "http://localhost:11434"
+}

@@ -2,3 +2,6 @@
 logs/
 node_modules/
 .DS_Store
+# Per-machine settings and generated files (see install.mjs)
+config.json
+models/

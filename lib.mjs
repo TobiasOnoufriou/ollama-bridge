@@ -1,13 +1,14 @@
 // Shared helpers for the Ollama bridge: per-project conversation log + Ollama chat call.
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { HERE, loadConfig } from "./config.mjs";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-
-export const OLLAMA_URL = process.env.OLLAMA_HOST_URL || "http://localhost:11434";
-export const DEFAULT_MODEL = process.env.OLLAMA_BRIDGE_MODEL || "qwen2.5-coder:14b";
-export const NUM_CTX = Number(process.env.OLLAMA_BRIDGE_NUM_CTX || 32768);
+// Environment variables override config.json.
+const config = loadConfig();
+export const OLLAMA_URL = process.env.OLLAMA_HOST_URL || config.ollamaUrl;
+export const DEFAULT_MODEL = process.env.OLLAMA_BRIDGE_MODEL || config.bridgeModel;
+export const REASONING_MODEL = process.env.OLLAMA_BRIDGE_REASONING_MODEL || config.reasoningModel;
+export const NUM_CTX = Number(process.env.OLLAMA_BRIDGE_NUM_CTX || config.bridgeNumCtx);
 // Rough budget for history sent to the model (~4 chars per token, leave room for the reply).
 const MAX_HISTORY_CHARS = Number(process.env.OLLAMA_BRIDGE_MAX_CHARS || 80000);
 

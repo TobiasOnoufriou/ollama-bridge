@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Launch Claude Code against the local Ollama model instead of Anthropic's API (macOS/Linux).
+# Usage (from any project folder):  claude-local [-Model name] [any other claude args]
+# The variables are set for this process only, so normal Claude sessions are unaffected.
+set -euo pipefail
+
+# Resolve symlinks (e.g. ~/.local/bin/claude-local) to find the repo folder.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+HERE="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js isn't installed. Get it from https://nodejs.org (or your package manager)." >&2
+  exit 1
+fi
+if ! command -v claude >/dev/null 2>&1; then
+  echo "The Claude Code CLI isn't installed. Install it with: curl -fsSL https://claude.ai/install.sh | bash" >&2
+  exit 1
+fi
+
+# Defaults come from config.json (see install.mjs); environment variables override them.
+cfg() { node "$HERE/config.mjs" "$1"; }
+MODEL="${CLAUDE_LOCAL_MODEL:-$(cfg claudeLocalVariant)}"
+# Context window the model was created with (see the generated models/*.Modelfile num_ctx).
+CONTEXT_TOKENS="${CLAUDE_LOCAL_CTX:-$(cfg claudeLocalCtx)}"
+OLLAMA_URL="${OLLAMA_HOST_URL:-$(cfg ollamaUrl)}"
+
+REST=()
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-Model" ] && [ $# -gt 1 ]; then
+    MODEL="$2"
+    shift 2
+  else
+    REST+=("$1")
+    shift
+  fi
+done
+
+if ! node -e 'fetch(process.argv[1] + "/api/version", { signal: AbortSignal.timeout(3000) }).then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))' "$OLLAMA_URL"; then
+  echo "Ollama isn't running. Start the Ollama app (or run 'ollama serve') and try again." >&2
+  exit 1
+fi
+
+export ANTHROPIC_BASE_URL="$OLLAMA_URL"
+export ANTHROPIC_AUTH_TOKEN="ollama"
+export ANTHROPIC_API_KEY=""
+# Route the background/small-model calls to the same local model.
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
+export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CONTEXT_TOKENS"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
+
+printf '\033[36mClaude Code -> local Ollama model %s (%s-token context)\033[0m\n' "'$MODEL'" "$CONTEXT_TOKENS"
+# ${REST[@]+...} keeps bash 3.2 (macOS) happy with an empty array under set -u.
+exec claude --model "$MODEL" ${REST[@]+"${REST[@]}"}

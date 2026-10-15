@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Chat with the local model yourself, sharing the current folder's log with Claude (macOS/Linux).
+set -euo pipefail
+
+# Resolve symlinks (e.g. ~/.local/bin/local-chat) to find the repo folder.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+HERE="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+exec node "$HERE/chat.mjs" "$@"
