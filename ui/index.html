@@ -224,6 +224,28 @@
   #suggestions .project .meta { font-family: var(--mono); }
   .add-dlg .section-label { padding: 4px 18px 6px; }
 
+  /* Deleting projects */
+  .project-row { position: relative; }
+  .project-row .project { padding-right: 36px; }
+  .row-del {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    width: 28px; height: 28px; padding: 0; display: grid; place-items: center;
+    background: transparent; border-color: transparent; color: var(--muted); opacity: 0;
+  }
+  .project-row:hover .row-del, .row-del:focus-visible { opacity: 1; }
+  .row-del:hover { color: var(--bad); border-color: var(--border); background: var(--panel); }
+  @media (hover: none) { .row-del { opacity: .7; } }
+  .no-projects { padding: 8px 10px; color: var(--muted); font-size: 13px; }
+  button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+  button.danger:disabled { opacity: .6; }
+  button.danger-text:hover { color: var(--bad); }
+  .del-dlg { width: min(520px, calc(100vw - 32px)); }
+  .del-dlg .dlg-body { padding-top: 12px; }
+  .del-dlg .path { font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
+  .check-line { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .check-line input { margin-top: 3px; }
+  .check-line input:disabled + span { color: var(--muted); }
+
   /* Toast */
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0;
@@ -268,7 +290,7 @@
         <button data-launch="folder" title="Open this folder in your file manager">
           <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 4.5a1 1 0 011-1h3.5l1.5 1.5h6a1 1 0 011 1v6a1 1 0 01-1 1h-11a1 1 0 01-1-1z"/></svg>Folder</button>
         <span class="sep"></span>
-        <button class="ghost" id="removeBtn" title="Remove this project from the list">Remove</button>
+        <button class="ghost danger-text" id="removeBtn" title="Delete this project from the list">Delete</button>
       </div>
     </div>
     <div class="controls">
@@ -303,6 +325,21 @@
   <div id="suggestWrap" hidden>
     <div class="section-label">Recent Claude Code folders</div>
     <div id="suggestions"></div>
+  </div>
+</dialog>
+
+<dialog id="delDlg" class="del-dlg">
+  <div class="dlg-head"><h2>Delete <span id="delName"></span>?</h2></div>
+  <div class="dlg-body">
+    <div class="path" id="delPath"></div>
+    <p>It will be removed from your project list. <strong>The folder and its files on disk are not touched</strong>,
+      and you can add it again any time.</p>
+    <label class="check-line"><input type="checkbox" id="delHistory"> <span id="delHistoryLabel"></span></label>
+  </div>
+  <div class="add-actions">
+    <span class="grow"></span>
+    <button id="delCancel">Cancel</button>
+    <button class="danger" id="delConfirm">Delete project</button>
   </div>
 </dialog>
 
@@ -372,12 +409,22 @@ function relTime(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
+const TRASH = `<svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+  <path d="M2.5 4.5h11M6.5 4.5V3a1 1 0 011-1h1a1 1 0 011 1v1.5M4 4.5l.7 8.6a1 1 0 001 .9h4.6a1 1 0 001-.9l.7-8.6M6.8 7v4.5M9.2 7v4.5"/></svg>`;
+
 function renderProjects() {
+  if (!state.projects.length) {
+    $("projects").innerHTML = `<div class="no-projects">No projects yet. Click <strong>+ Add</strong> to add a folder.</div>`;
+    return;
+  }
   $("projects").innerHTML = state.projects.map((p, i) => `
-    <button class="project ${p.project === state.project ? "active" : ""}" data-i="${i}" title="${esc(p.project)}">
-      <div class="name">${esc(basename(p.project))}${p.current ? '<span class="tag">here</span>' : ""}${p.exists ? "" : '<span class="tag missing">missing</span>'}</div>
-      <div class="meta">${p.messages} message${p.messages === 1 ? "" : "s"} · ${relTime(p.updated)}</div>
-    </button>`).join("");
+    <div class="project-row">
+      <button class="project ${p.project === state.project ? "active" : ""}" data-i="${i}" title="${esc(p.project)}">
+        <div class="name">${esc(basename(p.project))}${p.current ? '<span class="tag">here</span>' : ""}${p.exists ? "" : '<span class="tag missing">missing</span>'}</div>
+        <div class="meta">${p.messages} message${p.messages === 1 ? "" : "s"} · ${relTime(p.updated)}</div>
+      </button>
+      <button class="row-del" data-del="${i}" title="Delete ${esc(basename(p.project))}" aria-label="Delete ${esc(basename(p.project))}">${TRASH}</button>
+    </div>`).join("");
 }
 
 function msgHtml(m) {
@@ -413,7 +460,7 @@ function renderHeader() {
     b.disabled = !p?.exists;
     if (p && !p.exists) b.title = "This folder no longer exists";
   }
-  $("removeBtn").hidden = !p || p.current;
+  $("removeBtn").hidden = !p;
 }
 
 let toastTimer;
@@ -435,17 +482,41 @@ async function launch(what) {
   } catch (e) { toast(e.message, true); }
 }
 
-async function removeCurrent() {
-  const p = state.projects.find((x) => x.project === state.project);
-  if (!p || !confirm(`Remove ${basename(p.project)} from the list?\nThe folder itself isn't touched.`)) return;
-  const deleteHistory = p.messages > 0 && confirm(`Also delete its shared conversation (${p.messages} messages)?\nCancel keeps it, so it comes back if you add the folder again.`);
-  await api("/api/projects/remove", { project: p.project, deleteHistory });
-  state.project = null;
-  store.set("project", "");
-  await loadProjects();
-  state.lastCount = -1;
-  loadHistory(true);
-  toast(`Removed ${basename(p.project)}`);
+// ---- delete a project (the folder on disk is never touched)
+let deleting = null;
+function openDelete(p) {
+  if (!p) return;
+  deleting = p;
+  $("delName").textContent = basename(p.project);
+  $("delPath").textContent = p.project;
+  const box = $("delHistory");
+  box.checked = p.messages > 0;
+  box.disabled = p.messages === 0;
+  $("delHistoryLabel").textContent = p.messages
+    ? `Also delete its shared conversation (${p.messages} message${p.messages === 1 ? "" : "s"})`
+    : "It has no shared conversation to delete";
+  $("delDlg").showModal();
+  $("delConfirm").focus();
+}
+
+async function confirmDelete() {
+  const p = deleting;
+  if (!p) return;
+  const deleteHistory = $("delHistory").checked;
+  $("delConfirm").disabled = true;
+  try {
+    await api("/api/projects/remove", { project: p.project, deleteHistory });
+    $("delDlg").close();
+    if (state.project === p.project) {
+      state.project = null;
+      store.set("project", "");
+    }
+    await loadProjects();
+    state.lastCount = -1;
+    loadHistory(true);
+    toast(`Deleted ${basename(p.project)}${deleteHistory ? " and its conversation" : ""}`);
+  } catch (e) { toast(e.message, true); }
+  finally { $("delConfirm").disabled = false; }
 }
 
 // ---- "Add project": a little terminal with folder completion
@@ -656,6 +727,8 @@ function autosize() {
 
 // ---- events
 $("projects").addEventListener("click", (e) => {
+  const del = e.target.closest(".row-del");
+  if (del) return openDelete(state.projects[del.dataset.del]);
   const btn = e.target.closest(".project");
   if (!btn) return;
   state.project = state.projects[btn.dataset.i].project;
@@ -685,7 +758,9 @@ $("actions").addEventListener("click", (e) => {
   const b = e.target.closest("[data-launch]");
   if (b && !b.disabled) launch(b.dataset.launch);
 });
-$("removeBtn").addEventListener("click", removeCurrent);
+$("removeBtn").addEventListener("click", () => openDelete(state.projects.find((x) => x.project === state.project)));
+$("delCancel").addEventListener("click", () => $("delDlg").close());
+$("delConfirm").addEventListener("click", confirmDelete);
 $("addProjectBtn").addEventListener("click", openAdd);
 $("closeAdd").addEventListener("click", () => $("addDlg").close());
 $("addBtn").addEventListener("click", () => addPath());

@@ -74,8 +74,11 @@ another port or `--no-open` to skip opening the browser.
 Click **+ Add** to add a folder. The box works like `cd` in a terminal: type a path (`~` works), press
 <kbd>Tab</kbd> to complete folder names, <kbd>↑</kbd>/<kbd>↓</kbd> to pick from the list and <kbd>Enter</kbd> to add.
 **Browse…** opens your system's folder picker, and folders you've used Claude Code in are suggested below.
-The list is saved per machine in `projects.json` (not committed). Removing a project only hides it; the folder
-is never touched, and its conversation is kept unless you choose to delete it.
+The list is saved per machine in `projects.json` (not committed).
+
+To delete a project, hover over it in the sidebar and click the trash icon (or use **Delete** in the project
+header). This removes it from the list, including the folder you started the UI in, and optionally deletes its
+shared conversation. The folder and its files on disk are never touched; add it again any time.
 
 Each project has buttons to open, in that folder: **Claude** (Claude Code in a new terminal), **Claude (local)**
 (the same on your local model), **Terminal** and **Folder**. Windows uses Windows Terminal when it's installed

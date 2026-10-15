@@ -51,7 +51,7 @@ export function claudeCodeProjects() {
   }
 }
 
-// Every project to show: added folders, folders with a shared log, and the current folder; minus hidden ones.
+// Every project to show: added folders, folders with a shared log, and the current folder; minus deleted (hidden) ones.
 export function allProjects(current = process.cwd()) {
   const store = loadStore();
   const hidden = new Set(store.hidden.map(key));
@@ -65,7 +65,7 @@ export function allProjects(current = process.cwd()) {
   for (const p of store.added) put(p, { added: true });
   if (current) put(current, { current: true });
   return [...byKey.entries()]
-    .filter(([k, p]) => !hidden.has(k) || p.current)
+    .filter(([k]) => !hidden.has(k))
     .map(([, p]) => ({ added: false, current: false, ...p, exists: isDir(p.project) }))
     .sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || String(b.updated).localeCompare(String(a.updated)) || a.project.localeCompare(b.project));
 }
