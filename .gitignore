@@ -1,0 +1,4 @@
+# Per-machine shared conversation logs
+logs/
+node_modules/
+.DS_Store
