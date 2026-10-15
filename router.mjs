@@ -2,7 +2,7 @@
 // Clear-cut cases are decided by rules (instant); the rest by asking the fast local model to classify.
 import fs from "node:fs";
 import path from "node:path";
-import { OLLAMA_URL, DEFAULT_MODEL, loadLog } from "./lib.mjs";
+import { OLLAMA_URL, DEFAULT_MODEL, loadLog, defaultSub } from "./lib.mjs";
 
 const CLASSIFIER_PROMPT = `You route a user's request to one of two assistants. Reply with JSON only.
 
@@ -37,9 +37,9 @@ const CLAUDE_HINTS = [
 // edit anything. Right after a plan it means "implement that plan", so it goes to Claude.
 const GO_AHEAD = /^\W*(ok(ay)?|yes|yep|yeah|sure|great|good|perfect|sounds good|looks good|lgtm|please)?\W*(go ahead|go for it|do it|do that|proceed|continue|start|implement( it| this| that)?|apply( it| this| that)?|build( it)?|make (it|the changes)|yes|ok(ay)?|yep|sure|lgtm|sounds good|looks good)\b/i;
 
-function followsPlan(prompt, dir) {
+function followsPlan(prompt, dir, sub) {
   if (!dir || prompt.length > 300 || !GO_AHEAD.test(prompt)) return false;
-  const last = loadLog(dir).messages.findLast((m) => m.from !== "human");
+  const last = loadLog(dir, sub).messages.findLast((m) => m.from !== "human");
   return last?.mode === "plan";
 }
 
@@ -63,7 +63,7 @@ const FILE_RE = /\b[\w\-\/\\.]*\w\.(m?[jt]sx?|cjs|py|rb|go|rs|java|kt|cs|cpp|cc|
 // Smart never picks an effort above medium.
 const clampEffort = (e) => (e === "low" ? "low" : "medium");
 
-function byRules(prompt, dir) {
+function byRules(prompt, dir, sub) {
   // Pasted code (a fenced block, and a "name.js:" label right above it, as the web UI adds for dropped files)
   // is already in the prompt, so it doesn't count as asking about a file.
   const outsideCode = prompt.replace(/(^|\n)[^\n`]*:[ \t]*\n```[\s\S]*?```/g, "\n").replace(/```[\s\S]*?```/g, "");
@@ -72,7 +72,7 @@ function byRules(prompt, dir) {
   const heavy = /\b(fix|debug|bugs?|crash\w*|broken|fail\w*|error|optimi[sz]e|why (does|is|do))\b/i.test(prompt);
   const quick = prompt.length < 160 && !heavy && !CLAUDE_HINTS.some((re) => re.test(prompt)) ? "low" : "medium";
   if (file) return { route: "claude", effort: quick, reason: `mentions ${file} in this project` };
-  if (followsPlan(prompt, dir)) return { route: "claude", effort: "medium", reason: "goes ahead with the plan above" };
+  if (followsPlan(prompt, dir, sub)) return { route: "claude", effort: "medium", reason: "goes ahead with the plan above" };
   // Capitalised framework names (Node.js, Vue.js, Next.js) aren't files.
   const named = [...outsideCode.matchAll(new RegExp(FILE_RE.source, "gi"))].map((m) => m[0]).find((n) => !/^[A-Z][a-z]+\.js$/.test(n));
   if (named) return { route: "claude", effort: quick, reason: `asks about ${named}, which the local model can't open` };
@@ -110,8 +110,8 @@ async function byModel(prompt, model) {
 }
 
 // Returns { route: "local" | "claude", effort: "low" | "medium", reason, by: "rules" | "model" | "fallback" }.
-export async function routePrompt(prompt, { dir, model = DEFAULT_MODEL } = {}) {
-  const rule = byRules(prompt, dir);
+export async function routePrompt(prompt, { dir, sub = defaultSub(), model = DEFAULT_MODEL } = {}) {
+  const rule = byRules(prompt, dir, sub);
   if (rule) return { ...rule, by: "rules" };
   try {
     return { ...(await byModel(prompt, model)), by: "model" };

@@ -85,7 +85,7 @@ function spawnClaude(args, opts) {
 // Returns { reply, model, ms, costUsd, usage, isError }.
 // logText: what the log shows for the prompt (e.g. a short label instead of a pasted plan).
 // sub: the sub-session ("" = main).
-export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", mode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [] }) {
+export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", mode: startMode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [] }) {
   const usedEffort = effort || (AUTO_EFFORTS.has(autoEffort) ? autoEffort : "");
   const mode = startMode || "acceptEdits";
   const profile = mode === "plan" ? "read" : mode === "acceptEdits" ? "edit" : "full";
@@ -107,7 +107,8 @@ export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", m
   const context = (session, upTo) => (useHistory ? sharedContext(log.messages.slice(session ? upTo : 0), session, exclude) : "");
   let r = await runOnce(saved ? [...base, "--resume", saved.session] : base, prompt + context(saved?.session, saved?.upTo), dir, env);
   // The saved session can be gone (deleted, other machine, expired): start a new one with the full context.
-  if (saved && (r.code !== 0 || r.json?.is_error) && /no conversation|not found|session/i.test(`${r.err} ${r.json?.result || ""}`)) {
+  // Only for that error: a broader match (e.g. a usage-limit message) would pay for the whole prompt twice.
+  if (saved && (r.code !== 0 || r.json?.is_error) && /no conversation found|session[^.\n]{0,60}not found/i.test(`${r.err} ${r.json?.result || ""}`)) {
     r = await runOnce(base, prompt + context(null, 0), dir, env);
   }
   const { code, out, err, json } = r;

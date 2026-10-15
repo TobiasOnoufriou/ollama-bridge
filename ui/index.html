@@ -1348,7 +1348,7 @@ async function sendMessage(override = {}) {
     const typed = p.tag ? `you typed ${p.tag}` : null;
     let route = target === "smart" ? null : { to: target, reason: typed || override.reason || (target === "claude" ? "you chose Claude" : "you chose local"), by: "you" };
     if (!route) {
-      const r = await api("/api/route", { project: state.project, prompt: text });
+      const r = await api("/api/route", { project: state.project, sub, prompt: text });
       route = { to: r.route, reason: r.reason, by: r.by, effort: r.effort };
       mine.route = route;
       pending.from = route.to === "claude" ? "claude" : "local";

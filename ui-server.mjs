@@ -204,7 +204,7 @@ async function route(req, res, url) {
     }
     if (pathname === "/api/route") {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
-      return send(res, 200, await routePrompt(body.prompt, { dir: projectParam(body.project) }));
+      return send(res, 200, await routePrompt(body.prompt, { dir: projectParam(body.project), sub: subParam(body.sub) }));
     }
     if (pathname === "/api/claude") {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });

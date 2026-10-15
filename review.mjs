@@ -245,7 +245,7 @@ export async function implementAndReview({ dir, sub = "", planMessage, opts = {}
   let fix = null, recheck = null;
 
   const verdict = review.problems.length ? `${review.problems.length} problem${review.problems.length === 1 ? "" : "s"} found` : "everything checks out";
-  postLocal(dir, sub, reviewModel, `${reviewMarkdown(`Review of Claude's changes: ${verdict}`, review.lines)}${
+  const reviewTs = postLocal(dir, sub, reviewModel, `${reviewMarkdown(`Review of Claude's changes: ${verdict}`, review.lines)}${
     review.problems.length && reviewMode === "fix" ? "\n\nSending these to Claude to fix (one round)." : ""}`, total);
 
   if (review.problems.length && reviewMode === "fix") {
@@ -262,6 +262,7 @@ export async function implementAndReview({ dir, sub = "", planMessage, opts = {}
       effort: opts.effort || "medium",
       fast: opts.fast === true,
       meta: { route: { to: "claude", reason: "fixing review findings", by: "you" } },
+      exclude: [reviewTs], // the problems are already in the prompt
     });
     // Re-check in code only (no second fix round): syntax, unused functions, and steps whose file still didn't change.
     onProgress("Re-checking after the fix");
@@ -286,8 +287,11 @@ export async function implementAndReview({ dir, sub = "", planMessage, opts = {}
   return { impl, review, fix, recheck };
 }
 
+// Returns the message timestamp.
 function postLocal(dir, sub, model, content, usage) {
   const log = loadLog(dir, sub);
-  log.messages.push({ from: "local", model, content, ts: new Date().toISOString(), mode: "review", usage });
+  const ts = new Date().toISOString();
+  log.messages.push({ from: "local", model, content, ts, mode: "review", usage });
   saveLog(log, dir, sub);
+  return ts;
 }

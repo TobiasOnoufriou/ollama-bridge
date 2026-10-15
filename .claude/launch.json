@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "ui-demo", "runtimeExecutable": "node", "runtimeArgs": ["ollama-bridge.mjs", "ui", "--no-open", "--port", "4318"], "port": 4318 }
+  ]
+}
