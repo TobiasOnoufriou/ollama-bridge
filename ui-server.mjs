@@ -16,6 +16,7 @@ import { planAndLog } from "./planner.mjs";
 import { implementAndReview } from "./review.mjs";
 import { contextSize, transcriptFor, recentTranscripts, shouldHint, savings } from "./session-hint.mjs";
 import { handoff, copyToClipboard } from "./handoff.mjs";
+import { repoFor, listIssues, getIssue, issueMarkdown, issueBranch, issueSession } from "./issues.mjs";
 
 // Live progress of step-by-step plans, by an id the page picks.
 const progress = new Map();
@@ -98,6 +99,19 @@ async function route(req, res, url) {
   if (req.method === "GET" && pathname === "/api/history") {
     const dir = projectParam(url.searchParams.get("project"));
     return send(res, 200, { ...loadLog(dir), sessionHints: sessionHints(dir) });
+  }
+  // GitHub issues of the project's repo, for starting a session on one.
+  if (req.method === "GET" && pathname === "/api/issues") {
+    const repo = await repoFor(projectParam(url.searchParams.get("project")));
+    const issues = await listIssues(repo, { state: url.searchParams.get("state") || "open", search: url.searchParams.get("q") || "" });
+    return send(res, 200, { repo, issues: issues.map((i) => ({ ...i, branch: issueBranch(i) })) });
+  }
+  // One issue as Markdown, trimmed to what a local model's context can take, for planning it locally.
+  if (req.method === "GET" && pathname === "/api/issues/view") {
+    const repo = await repoFor(projectParam(url.searchParams.get("project")));
+    const issue = await getIssue(repo, url.searchParams.get("number"));
+    const md = issueMarkdown(repo, issue);
+    return send(res, 200, { repo, number: issue.number, title: issue.title, markdown: md.length > 12000 ? `${md.slice(0, 12000)}\n\n[... cut; the full issue is at ${issue.url}]` : md });
   }
   if (req.method === "GET" && pathname === "/api/models") return send(res, 200, await modelsWithRoles());
   if (req.method === "GET" && pathname === "/api/status") return send(res, 200, await checkStatus());
@@ -204,6 +218,15 @@ async function route(req, res, url) {
       if (!isKnownProject(dir, startDir)) return send(res, 400, { error: "Add the folder as a project first" });
       await launchIn(dir, body.what, { model: body.model || "", mode: body.mode || "", effort: body.effort || "", fast: body.fast === true });
       return send(res, 200, { ok: true });
+    }
+    // New Claude Code session (Claude, or Claude on the local model) in a terminal, briefed on a GitHub issue.
+    if (pathname === "/api/issues/start") {
+      const dir = projectParam(body.project);
+      if (!isKnownProject(dir, startDir)) return send(res, 400, { error: "Add the folder as a project first" });
+      if (!["claude", "local"].includes(body.what)) return send(res, 400, { error: "Start Claude or Claude (local)" });
+      const out = await issueSession(dir, body.number, { branch: body.branch !== false });
+      await launchIn(dir, body.what, { model: body.model || "", mode: body.mode || "", effort: body.effort || "", fast: body.fast === true, session: out.session });
+      return send(res, 200, { repo: out.repo, number: out.issue.number, title: out.issue.title, branch: out.branch });
     }
     // Forget the chat's Claude sessions: the next Claude run starts fresh, with recent shared messages as background.
     if (pathname === "/api/claude/fresh") {

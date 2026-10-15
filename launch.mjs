@@ -78,9 +78,10 @@ const MODEL_RE = /^[A-Za-z0-9._:\/\-\[\]]{1,100}$/;
 // Fast mode has no CLI flag; it's a per-session setting. A file avoids quoting JSON through PowerShell.
 const FAST_SETTINGS = path.join(HERE, "fast-mode.settings.json");
 
-// Claude Code arguments for the chosen options; opts: { model, mode, effort, fast }.
+// Claude Code arguments for the chosen options; opts: { model, mode, effort, fast, session }.
+// session = { prompt, name, addDir } starts it on a task (see issues.mjs): first message, display name, extra folder.
 // local = Claude Code running on an Ollama model, where effort and fast mode don't apply.
-export function claudeArgs({ model = "", mode = "", effort = "", fast = false } = {}, { local = false } = {}) {
+export function claudeArgs({ model = "", mode = "", effort = "", fast = false, session = null } = {}, { local = false } = {}) {
   if (model && !MODEL_RE.test(model)) throw new Error(`Invalid model name: ${model}`);
   if (mode && !(mode in START_MODES)) throw new Error(`Unknown start mode: ${mode}`);
   if (effort && !(effort in EFFORT_LEVELS)) throw new Error(`Unknown effort level: ${effort}`);
@@ -91,6 +92,15 @@ export function claudeArgs({ model = "", mode = "", effort = "", fast = false } 
       if (!fs.existsSync(FAST_SETTINGS)) fs.writeFileSync(FAST_SETTINGS, JSON.stringify({ fastMode: true }) + "\n");
       args.push("--settings", FAST_SETTINGS);
     }
+  }
+  if (session) {
+    // These go through a shell command line; refuse anything that a quote or line break could break out of.
+    for (const v of [session.prompt, session.name, session.addDir]) {
+      if (v && /["`$\r\n]/.test(v)) throw new Error("Session text can't contain quotes, $ or line breaks");
+    }
+    if (session.addDir) args.push("--add-dir", session.addDir);
+    if (session.name) args.push("--name", session.name);
+    if (session.prompt) args.push(session.prompt);
   }
   return args;
 }
@@ -110,7 +120,7 @@ export function commandFor(what, opts) {
   return null;
 }
 
-// opts: { model, mode, effort, fast } for the claude and local targets; model is a Claude alias/id or an Ollama model name.
+// opts: { model, mode, effort, fast, session } for the claude and local targets; model is a Claude alias/id or an Ollama model name.
 export async function launchIn(dir, what, opts = {}) {
   if (!(what in LAUNCH_TARGETS)) throw new Error(`Unknown launch target: ${what}`);
   if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`Folder not found: ${dir}`);

@@ -44,6 +44,10 @@ ${bold("Usage:")} ollama-bridge <command> [options]
                               --plan          start in plan mode (or --mode acceptEdits|auto)
                               --effort <level> low, medium, high, xhigh or max
                               --fast          fast mode (Opus only, billed to usage credits)
+  ${cyan("issues")} [folder]              List the GitHub issues of the folder's repo (--closed, --all, --search text)
+  ${cyan("issue")} <number> [folder]      New Claude Code window working on that issue, on a new branch
+                              --local for Claude Code on the local model, --no-branch to stay on this one,
+                              and the same --model, --plan, --effort, --fast as open
   ${cyan("handoff")}                     Summarise this folder's latest Claude Code session with the local model,
                               for pasting into a new (cheaper) session. --session <id>, --model, --no-copy
   ${cyan("reset")} [--yes]               Clear this folder's shared log
@@ -184,6 +188,55 @@ switch (cmd) {
       const dir = resolveUserPath(folder);
       await launchIn(dir, what, { model: opt("--model"), mode: flag("--plan") ? "plan" : opt("--mode"), effort: opt("--effort"), fast: flag("--fast") });
       console.log(green(`Opened ${LAUNCH_TARGETS[what]} in ${dir}`));
+    } catch (err) {
+      console.error(red(err.message));
+      process.exit(1);
+    }
+    break;
+  }
+
+  case "issues": {
+    // ollama-bridge issues [folder] [--closed | --all] [--search text]
+    const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : "");
+    const folder = args.find((a, i) => !a.startsWith("--") && args[i - 1] !== "--search") || ".";
+    const { repoFor, listIssues } = await import("./issues.mjs");
+    try {
+      const repo = await repoFor(resolveUserPath(folder));
+      const state = flag("--all") ? "all" : flag("--closed") ? "closed" : "open";
+      const issues = await listIssues(repo, { state, search: opt("--search") });
+      if (!issues.length) console.log(dim(`No ${state === "all" ? "" : `${state} `}issues in ${repo}.`));
+      for (const i of issues) {
+        const labels = i.labels.length ? ` ${dim(`[${i.labels.join(", ")}]`)}` : "";
+        const closed = i.state === "closed" ? ` ${dim("(closed)")}` : "";
+        console.log(`  ${cyan(`#${i.number}`.padStart(6))}  ${i.title}${labels}${closed}`);
+      }
+      if (issues.length) console.log(dim(`
+${repo}. Start a session on one with: ollama-bridge issue <number>`));
+    } catch (err) {
+      console.error(red(err.message));
+      process.exit(1);
+    }
+    break;
+  }
+
+  case "issue": {
+    // ollama-bridge issue <number> [folder] [--local] [--no-branch] [--model name] [--plan | --mode m] [--effort e] [--fast]
+    const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : "");
+    const positional = args.filter((a, i) => !a.startsWith("--") && !["--model", "--mode", "--effort"].includes(args[i - 1]));
+    const [number, folder = "."] = positional;
+    if (!/^#?d+$/.test(number || "")) {
+      console.error(red("Usage: ollama-bridge issue <number> [folder] [--local] [--no-branch] [--model name] [--plan]"));
+      process.exit(1);
+    }
+    const { issueSession } = await import("./issues.mjs");
+    try {
+      const dir = resolveUserPath(folder);
+      const what = flag("--local") ? "local" : "claude";
+      const out = await issueSession(dir, number.replace("#", ""), { branch: !flag("--no-branch") });
+      await launchIn(dir, what, { model: opt("--model"), mode: flag("--plan") ? "plan" : opt("--mode"), effort: opt("--effort"), fast: flag("--fast"), session: out.session });
+      console.log(green(`Opened ${LAUNCH_TARGETS[what]} on ${out.repo}#${out.issue.number}: ${out.issue.title}`));
+      console.log(dim(`Issue text: ${out.file}${out.branch ? `
+It will work on branch ${out.branch}` : ""}`));
     } catch (err) {
       console.error(red(err.message));
       process.exit(1);

@@ -231,6 +231,35 @@
   #suggestions .project .meta { font-family: var(--mono); }
   .add-dlg .section-label { padding: 4px 18px 6px; }
 
+  /* GitHub issues picker */
+  .issues-dlg { width: min(720px, calc(100vw - 32px)); }
+  .issues-dlg .dlg-head { gap: 12px; flex-wrap: wrap; }
+  .issues-dlg .dlg-head h2 { flex: 1; min-width: 0; }
+  .issues-dlg .dlg-head h2 small { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .issue-search { display: flex; gap: 8px; padding: 12px 18px 4px; }
+  .issue-search input {
+    flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+  }
+  #issueList { max-height: 46vh; overflow-y: auto; padding: 6px 10px; }
+  .issue {
+    all: unset; box-sizing: border-box; display: grid; grid-template-columns: auto 1fr; gap: 0 10px; width: 100%;
+    padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; cursor: pointer;
+  }
+  .issue:hover { background: var(--bg); }
+  .issue.sel { background: var(--accent-soft); border-color: var(--accent); }
+  .issue:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .issue .num { font-family: var(--mono); font-size: 12px; color: var(--muted); padding-top: 2px; }
+  .issue .t { font-weight: 550; overflow-wrap: anywhere; }
+  .issue .m { grid-column: 2; font-size: 12px; color: var(--muted); }
+  .issue .lbl { font-size: 11px; padding: 0 6px; border-radius: 99px; border: 1px solid var(--border); margin-right: 4px; color: var(--text); }
+  .issue.closed .t { color: var(--muted); }
+  .issues-msg { padding: 18px 8px; color: var(--muted); font-size: 13px; text-align: center; }
+  .issues-msg code { font-family: var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 4px; color: var(--text); }
+  .issues-dlg .add-actions { border-top: 1px solid var(--border); }
+  .issues-dlg .add-actions button:disabled { opacity: .45; cursor: default; }
+  .issues-dlg .add-actions .grow { font-size: 13px; color: var(--text); }
+  .issues-dlg .branch-name { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
   /* Settings summary + panel */
   .summary {
     all: unset; cursor: pointer; display: block; margin-top: 8px; font-size: 12px; color: var(--muted);
@@ -402,6 +431,8 @@
           <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6.5l2 1.5-2 1.5M8 10h3"/></svg>Terminal</button>
         <button data-launch="folder" title="Open this folder in your file manager">
           <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 4.5a1 1 0 011-1h3.5l1.5 1.5h6a1 1 0 011 1v6a1 1 0 01-1 1h-11a1 1 0 01-1-1z"/></svg>Folder</button>
+        <button id="issuesBtn" title="Pick a GitHub issue of this repo and start a Claude session on it (Alt+I)">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/></svg>Issues</button>
         <span class="sep"></span>
         <button id="settingsBtn" title="Choose models, effort, fast mode and how Claude starts">
           <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h9M14 12h0"/><circle cx="10.5" cy="4" r="1.5"/><circle cx="5.5" cy="8" r="1.5"/><circle cx="12.5" cy="12" r="1.5"/></svg>Settings</button>
@@ -449,6 +480,28 @@
   </div>
 </dialog>
 
+<dialog id="issuesDlg" class="issues-dlg">
+  <div class="dlg-head">
+    <h2>Issues <small id="issuesRepo"></small></h2>
+    <div class="range" role="tablist" aria-label="Issue state">
+      <button data-istate="open">Open</button><button data-istate="closed">Closed</button><button data-istate="all">All</button>
+    </div>
+    <button class="ghost" id="closeIssues">Close</button>
+  </div>
+  <div class="issue-search">
+    <input id="issueQuery" type="search" placeholder="Search issues (GitHub search, e.g. label:bug login)" spellcheck="false" autocomplete="off" aria-label="Search issues">
+    <button id="issueRefresh" title="Reload from GitHub">Refresh</button>
+  </div>
+  <div id="issueList" role="listbox" aria-label="Issues"></div>
+  <div class="add-actions">
+    <label class="check-line grow" title="Claude creates this branch before changing any files">
+      <input type="checkbox" id="issueBranch" checked><span>New branch <span class="branch-name" id="issueBranchName"></span></span></label>
+    <button id="issuePlan" disabled title="The local model writes a step-by-step plan for the issue in this chat (free); then use Implement with Claude">Plan locally</button>
+    <button id="issueLocal" disabled title="Open Claude Code on your local model in a new terminal, working on this issue">Claude (local)</button>
+    <button class="primary" id="issueStart" disabled title="Open Claude Code in a new terminal, working on this issue (model, effort and start mode from Settings)">Start in Claude</button>
+  </div>
+</dialog>
+
 <dialog id="keysDlg" class="keys-dlg">
   <div class="dlg-head"><h2>Shortcuts &amp; tricks</h2><button class="ghost" id="closeKeys">Close</button></div>
   <div class="dlg-body">
@@ -470,6 +523,7 @@
       <tr><td><kbd>Alt</kbd>+<kbd>S</kbd></td><td>settings</td></tr>
       <tr><td><kbd>Alt</kbd>+<kbd>U</kbd></td><td>usage</td></tr>
       <tr><td><kbd>Alt</kbd>+<kbd>N</kbd></td><td>add a project</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>I</kbd></td><td>GitHub issues: start a Claude session on one</td></tr>
       <tr><td><kbd>?</kbd></td><td>this list</td></tr>
     </table>
   </div>
@@ -688,6 +742,7 @@ function renderHeader() {
     b.disabled = !p?.exists;
     if (p && !p.exists) b.title = "This folder no longer exists";
   }
+  $("issuesBtn").disabled = !p?.exists;
   $("removeBtn").hidden = !p;
 }
 
@@ -715,6 +770,94 @@ async function launch(what) {
     const detailText = detail.filter(Boolean).join(", ");
     toast(`Opened ${LAUNCH_LABEL[what]} in ${basename(state.project)}${detailText ? ` (${detailText})` : ""}`);
   } catch (e) { toast(e.message, true); }
+}
+
+// ---- GitHub issues: pick one, then start a Claude session (or a local plan) on it
+const issues = { list: [], sel: null, state: "open", seq: 0, timer: null };
+function openIssues() {
+  const p = state.projects.find((x) => x.project === state.project);
+  if (!p?.exists) return;
+  if (issues.project !== state.project) Object.assign(issues, { project: state.project, list: [], sel: null });
+  $("issuesDlg").showModal();
+  $("issueQuery").focus();
+  loadIssues();
+}
+async function loadIssues() {
+  const seq = ++issues.seq;
+  for (const b of document.querySelectorAll("[data-istate]")) b.classList.toggle("on", b.dataset.istate === issues.state);
+  if (!issues.list.length) $("issueList").innerHTML = `<div class="issues-msg">Loading issues…</div>`;
+  try {
+    const q = new URLSearchParams({ project: state.project, state: issues.state, q: $("issueQuery").value.trim() });
+    const out = await api(`/api/issues?${q}`);
+    if (seq !== issues.seq) return;
+    $("issuesRepo").textContent = out.repo;
+    issues.list = out.issues;
+    if (!issues.list.some((i) => i.number === issues.sel?.number)) issues.sel = null;
+    renderIssues();
+  } catch (e) {
+    if (seq !== issues.seq) return;
+    issues.list = [];
+    issues.sel = null;
+    $("issuesRepo").textContent = "";
+    $("issueList").innerHTML = `<div class="issues-msg">${renderText(esc(e.message))}</div>`;
+    renderIssueActions();
+  }
+}
+function renderIssues() {
+  const q = $("issueQuery").value.trim();
+  $("issueList").innerHTML = issues.list.length ? issues.list.map((i) => `
+    <button class="issue ${i.state === "closed" ? "closed" : ""} ${issues.sel?.number === i.number ? "sel" : ""}" role="option" data-num="${i.number}"
+      aria-selected="${issues.sel?.number === i.number}" title="Double-click to start in Claude">
+      <span class="num">#${i.number}</span><span class="t">${esc(i.title)}</span>
+      <span class="m">${i.labels.map((l) => `<span class="lbl">${esc(l)}</span>`).join("")}${i.state === "closed" ? "closed · " : ""}@${esc(i.author || "?")} · updated ${relTime(i.updated)}${i.comments ? ` · ${i.comments} comment${i.comments === 1 ? "" : "s"}` : ""}</span>
+    </button>`).join("")
+    : `<div class="issues-msg">No ${issues.state === "all" ? "" : `${issues.state} `}issues${q ? " match that search" : " in this repo"}.</div>`;
+  renderIssueActions();
+}
+function renderIssueActions() {
+  const i = issues.sel;
+  for (const id of ["issueStart", "issueLocal", "issuePlan"]) $(id).disabled = !i || issues.busy;
+  $("issueBranchName").textContent = i ? i.branch : "issue-<number>-<title>";
+}
+function selectIssue(num) {
+  issues.sel = issues.list.find((i) => i.number === Number(num)) || null;
+  for (const b of document.querySelectorAll(".issue")) {
+    const on = Number(b.dataset.num) === issues.sel?.number;
+    b.classList.toggle("sel", on);
+    b.setAttribute("aria-selected", on);
+  }
+  renderIssueActions();
+}
+async function startIssue(what) {
+  const i = issues.sel;
+  if (!i || issues.busy) return;
+  issues.busy = true;
+  renderIssueActions();
+  try {
+    const o = claudeOpts();
+    const body = what === "claude" ? o : { model: $("localModel").value, mode: o.mode };
+    const out = await api("/api/issues/start", { project: state.project, number: i.number, what, branch: $("issueBranch").checked, ...body });
+    $("issuesDlg").close();
+    toast(`Opened ${LAUNCH_LABEL[what]} on #${out.number}${out.branch ? ` (branch ${out.branch})` : ""}`);
+  } catch (e) { toast(e.message, true); }
+  finally { issues.busy = false; renderIssueActions(); }
+}
+// The local model plans the issue in this chat; the plan gets the usual Implement with Claude button.
+async function planIssue() {
+  const i = issues.sel;
+  if (!i || issues.busy || state.sending) return;
+  issues.busy = true;
+  renderIssueActions();
+  try {
+    const out = await api(`/api/issues/view?${new URLSearchParams({ project: state.project, number: i.number })}`);
+    $("issuesDlg").close();
+    sendMessage({
+      text: `Plan how to resolve this GitHub issue in this project.\n\n${out.markdown}`,
+      target: "local", plan: true, reason: `GitHub issue #${i.number}`,
+      logText: `Plan GitHub issue #${i.number}: ${i.title}\n\n${out.markdown}`,
+    });
+  } catch (e) { toast(e.message, true); }
+  finally { issues.busy = false; renderIssueActions(); }
 }
 
 // ---- delete a project (the folder on disk is never touched)
@@ -1404,7 +1547,7 @@ document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.code === "KeyK") { e.preventDefault(); document.querySelectorAll("dialog[open]").forEach((d) => d.close()); $("input").focus(); return; }
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
     const act = { Digit1: () => setTarget("local"), Digit2: () => setTarget("smart"), Digit3: () => setTarget("claude"),
-      KeyP: () => $("planMode").click(), KeyS: openSettings, KeyU: openUsage, KeyN: openAdd }[e.code];
+      KeyP: () => $("planMode").click(), KeyS: openSettings, KeyU: openUsage, KeyN: openAdd, KeyI: openIssues }[e.code];
     if (act) { e.preventDefault(); document.querySelectorAll("dialog[open]").forEach((d) => d.close()); act(); }
     return;
   }
@@ -1419,6 +1562,29 @@ $("actions").addEventListener("click", (e) => {
   const b = e.target.closest("[data-launch]");
   if (b && !b.disabled) launch(b.dataset.launch);
 });
+$("issuesBtn").addEventListener("click", openIssues);
+$("closeIssues").addEventListener("click", () => $("issuesDlg").close());
+$("issueRefresh").addEventListener("click", loadIssues);
+$("issueQuery").addEventListener("input", () => { clearTimeout(issues.timer); issues.timer = setTimeout(loadIssues, 400); });
+$("issueQuery").addEventListener("keydown", (e) => {
+  const n = issues.list.length;
+  if (!n || !["ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
+  e.preventDefault();
+  if (e.key === "Enter") return issues.sel ? startIssue("claude") : selectIssue(issues.list[0].number);
+  const at = issues.list.findIndex((i) => i.number === issues.sel?.number);
+  const next = issues.list[(at + (e.key === "ArrowDown" ? 1 : n - 1) + (at < 0 && e.key === "ArrowUp" ? 1 : 0)) % n];
+  selectIssue(next.number);
+  document.querySelector(`.issue[data-num="${next.number}"]`)?.scrollIntoView({ block: "nearest" });
+});
+document.querySelector(".issues-dlg .range").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-istate]");
+  if (b && b.dataset.istate !== issues.state) { Object.assign(issues, { state: b.dataset.istate, list: [], sel: null }); renderIssueActions(); loadIssues(); }
+});
+$("issueList").addEventListener("click", (e) => { const b = e.target.closest(".issue"); if (b) selectIssue(b.dataset.num); });
+$("issueList").addEventListener("dblclick", (e) => { const b = e.target.closest(".issue"); if (b) { selectIssue(b.dataset.num); startIssue("claude"); } });
+$("issueStart").addEventListener("click", () => startIssue("claude"));
+$("issueLocal").addEventListener("click", () => startIssue("local"));
+$("issuePlan").addEventListener("click", planIssue);
 $("removeBtn").addEventListener("click", () => openDelete(state.projects.find((x) => x.project === state.project)));
 $("delCancel").addEventListener("click", () => $("delDlg").close());
 $("delConfirm").addEventListener("click", confirmDelete);
