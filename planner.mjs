@@ -18,7 +18,7 @@ const FILE_CHARS = 12000; // what one per-file question sees
 const MAX_SCOPE = 6;
 const MAX_RIPPLE = 5;
 
-async function ask(model, system, user, schema, { numPredict = 700 } = {}) {
+export async function ask(model, system, user, schema, { numPredict = 700 } = {}) {
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

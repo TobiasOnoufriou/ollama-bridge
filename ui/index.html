@@ -506,6 +506,11 @@
         billed to usage credits, not your plan's limits.</small></span></label>
       <div class="field"><label for="startMode">Starts in</label><select id="startMode"></select>
         <small>From this chat, Normal means Claude can read files but not change them; pick Auto-accept edits to let it edit.</small></div>
+      <div class="field"><label for="reviewMode">After Implement</label><select id="reviewMode">
+          <option value="fix">Local review, then Claude fixes real problems once</option>
+          <option value="review">Local review only</option>
+          <option value="off">No review</option></select>
+        <small>The local model checks each plan step against what actually changed, plus syntax and unused new functions. Free; a fix round costs one short Claude turn.</small></div>
     </section>
     <section>
       <h3>Claude Code on a local model <span>the Claude (local) button</span></h3>
@@ -640,7 +645,7 @@ function msgHtml(m, i) {
   const name = kind === "claude" ? "Claude" : kind === "human" ? "You" : "Local model";
   const letter = kind === "claude" ? "C" : kind === "human" ? "Y" : "L";
   const time = m.ts ? `<time>${new Date(m.ts).toLocaleString()}</time>` : "";
-  const model = (m.model ? `<span class="model">${esc(m.model)}</span>` : "") + (m.mode === "plan" ? '<span class="badge-plan">Plan</span>' : "");
+  const model = (m.model ? `<span class="model">${esc(m.model)}</span>` : "") + (m.mode === "plan" ? '<span class="badge-plan">Plan</span>' : m.mode === "review" ? '<span class="badge-plan">Review</span>' : "");
   const route = m.route ? `<span class="route-chip to-${m.route.to}" title="${esc(m.route.by === "you" ? "Chosen by you" : m.route.by === "rules" ? "Decided by a rule" : "Decided by the local classifier")}">${m.route.by === "you" ? "→" : "Smart →"} <b>${m.route.to === "claude" ? "Claude" : "Local"}</b> · ${esc(m.route.reason)}</span>` : "";
   const acts = m.pending ? "" : `<div class="msg-actions">
       <button data-act="copy" title="Copy this message">Copy</button>
@@ -1168,19 +1173,53 @@ Continue? (You won't be asked again for this project.)`);
     if (!ok) return;
     store.set(key, "1");
   }
-  sendMessage({
-    text:
-      "Carry out this plan, written by a local model from excerpts of this project. Check file and function names " +
-      "against the real code first; where the plan is wrong or incomplete, follow the code and say what you changed. " +
-      "Finish with a short summary of the edits.\n\n<plan>\n" + m.content + "\n</plan>",
-    logText: `Implement the plan above${m.model ? ` (from ${prettyModel(m.model)})` : ""}`,
-    target: "claude",
-    reason: "implementing the local plan",
-    plan: false,
-    mode: "acceptEdits",
-    effort: $("effort").value || "medium",
-    exclude: [m.ts],
-  });
+  runImplement(m);
+}
+
+// Claude implements, then (per Settings) the local model reviews the changes and Claude fixes real problems once.
+// The server runs the whole loop; the page shows each stage and reloads the conversation at the end.
+async function runImplement(m) {
+  if (state.sending || !state.project) return;
+  state.sending = true;
+  $("sendBtn").disabled = true;
+  const progressId = Math.random().toString(36).slice(2);
+  const pending = { from: "claude", model: "", content: "", pending: true };
+  state.messages.push({ from: "human", content: `Implement the plan above${m.model ? ` (from ${prettyModel(m.model)})` : ""}`, ts: new Date().toISOString(),
+    route: { to: "claude", reason: "implementing the local plan", by: "you" } }, pending);
+  let stage = "Claude Code is implementing the plan";
+  const started = Date.now();
+  const tick = () => {
+    pending.from = /^(Reviewing|Running|Re-checking)/.test(stage) ? "local" : "claude";
+    pending.content = `${stage}… ${Math.round((Date.now() - started) / 1000)}s`;
+    renderMessages(true);
+  };
+  tick();
+  const timer = setInterval(tick, 1000);
+  const poll = setInterval(async () => {
+    try { const pr = await api(`/api/progress?id=${progressId}`); if (pr.text) stage = pr.text; } catch {}
+  }, 1000);
+  try {
+    const o = claudeOpts();
+    const out = await api("/api/implement", {
+      project: state.project, planTs: m.ts, progressId, model: o.model, effort: o.effort || "medium", fast: o.fast,
+      reviewMode: $("reviewMode").value,
+    });
+    if (out.isError) toast("Claude Code reported an error; see its reply", true);
+    else if (out.problems === 0) toast("Implemented, and the review found no problems");
+    else if (out.fixed && out.fixChanged === 0) toast("Implemented; Claude checked the review's findings and changed nothing (false alarms)");
+    else if (out.fixed) toast(out.recheckOk ? "Implemented; Claude fixed what the review found" : "Implemented; some review problems remain, see the re-check", !out.recheckOk);
+    else if (out.problems) toast(`Implemented; the review found ${out.problems} problem${out.problems === 1 ? "" : "s"}`, true);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    clearInterval(timer);
+    clearInterval(poll);
+    state.sending = false;
+    $("sendBtn").disabled = false;
+  }
+  state.lastCount = -1;
+  await loadHistory(true);
+  loadProjects();
 }
 
 function openUsage() { $("usageDlg").showModal(); loadUsage(); }
@@ -1238,7 +1277,7 @@ $("list").addEventListener("click", async (e) => {
   } catch { btn.textContent = "Copy failed"; }
   setTimeout(() => (btn.textContent = "Copy"), 1500);
 });
-for (const id of ["model", "claudeModel", "effort", "localModel", "startMode", "projectFiles", "planStyle"]) {
+for (const id of ["model", "claudeModel", "effort", "localModel", "startMode", "projectFiles", "planStyle", "reviewMode"]) {
   $(id).addEventListener("change", () => { store.set(id, $(id).value); renderSummary(); });
 }
 for (const id of ["fastMode", "useHistory"]) {
@@ -1357,6 +1396,7 @@ $("closeDlg").addEventListener("click", () => $("statusDlg").close());
   if (store.get("useHistory") === "0") $("useHistory").checked = false;
   if (["plans", "always", "off"].includes(store.get("projectFiles"))) $("projectFiles").value = store.get("projectFiles");
   if (["steps", "quick"].includes(store.get("planStyle"))) $("planStyle").value = store.get("planStyle");
+  if (["fix", "review", "off"].includes(store.get("reviewMode"))) $("reviewMode").value = store.get("reviewMode");
   setTarget(["local", "smart", "claude"].includes(store.get("target")) ? store.get("target") : "smart");
   await Promise.all([loadHistory(true), loadModels(), loadLaunchOptions()]);
   loadStatus();

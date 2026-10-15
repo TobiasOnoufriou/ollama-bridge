@@ -13,6 +13,7 @@ import { runClaude } from "./claude-run.mjs";
 import { usage } from "./usage.mjs";
 import { projectContext } from "./context.mjs";
 import { planAndLog } from "./planner.mjs";
+import { implementAndReview } from "./review.mjs";
 
 // Live progress of step-by-step plans, by an id the page picks.
 const progress = new Map();
@@ -122,6 +123,32 @@ async function route(req, res, url) {
         dir,
       });
       return send(res, 200, { ...out, ms: Date.now() - started });
+    }
+    // Implement a local plan with Claude, then review (and fix once) per Settings; progress via /api/progress.
+    if (pathname === "/api/implement") {
+      const dir = projectParam(body.project);
+      const planMessage = loadLog(dir).messages.find((m) => m.ts === body.planTs && m.from === "local");
+      if (!planMessage) return send(res, 404, { error: "Plan not found in this project's conversation" });
+      const id = String(body.progressId || "").slice(0, 64);
+      const reviewMode = ["fix", "review", "off"].includes(body.reviewMode) ? body.reviewMode : "fix";
+      try {
+        const out = await implementAndReview({
+          dir,
+          planMessage,
+          opts: { model: body.model || "", effort: body.effort || "", fast: body.fast === true },
+          reviewMode,
+          onProgress: (text) => id && progress.set(id, { text, at: Date.now() }),
+        });
+        return send(res, 200, {
+          isError: !!out.impl?.isError,
+          problems: out.review?.problems.length ?? null,
+          fixed: !!out.fix,
+          fixChanged: out.fix ? (out.fix.changedFiles || []).length : null,
+          recheckOk: out.recheck ? out.recheck.every((l) => l.ok) : null,
+        });
+      } finally {
+        progress.delete(id);
+      }
     }
     if (pathname === "/api/route") {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });

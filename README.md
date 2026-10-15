@@ -243,6 +243,30 @@ Edit runs get only Read, Edit, Write, Grep and Glob, with no MCP servers or skil
 refused from the chat anyway. Implementing a small three-file change on Haiku took 38k input tokens, 8 turns and
 $0.034, against 323k tokens, 17 turns and $0.081 with the full toolset. Auto mode keeps the full toolset.
 
+#### Review after Implement
+
+After Claude implements a plan, the local model checks its work for free (an *evaluator-optimizer* loop, from
+Anthropic's [Building Effective Agents](https://www.anthropic.com/research/building-effective-agents)):
+
+1. The bridge snapshots the project before Claude runs and works out exactly what changed (`review.mjs`).
+2. **One question per plan step:** "was this done?", shown only the diff of that step's file. A "not done"
+   verdict gets a second, differently worded question ("quote the added line that does it") and only counts if
+   both agree, which stops the small model's misreadings from becoming problems.
+3. **Code checks:** changed JS/JSON (and Python, if installed) files pass a syntax check; new functions are called
+   somewhere; files changed that the plan didn't mention are listed.
+4. **Real problems only** (a step not done, a syntax error, a new function nothing calls) go back to Claude in
+   **one** short follow-up, in the same session, so it's mostly cache reads. Claude may answer that a finding is a
+   false alarm instead of changing code. The code checks then run again; there's no second round, so cost stays
+   bounded.
+
+The review and re-check appear in the conversation with a **Review** badge. Settings → Claude Code → **After
+Implement** chooses: review, then fix once (default) / review only / no review.
+
+In testing on the sample app, the review caught a skipped step, a syntax error, an unused function and an unplanned
+file in a deliberately flawed change (11 s, free). In a real run (Haiku): implement $0.040, local review ~2 s; an
+early version raised a false alarm that cost one $0.005 fix turn (Claude correctly declined to change anything),
+which the second check now clears while still catching a step that was really skipped.
+
 ## Configuration
 
 Edit `config.json` (per machine, not committed) and re-run `node install.mjs` to pull and create any new models.
