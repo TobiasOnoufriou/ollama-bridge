@@ -196,7 +196,9 @@ async function route(req, res, url) {
         dir: projectParam(body.project),
         prompt: body.prompt,
         model: body.model || "",
-        mode: body.plan === true ? "plan" : body.mode || "",
+        // The Plan box is the chat's only plan switch: a "Starts in: Plan mode" setting (meant for new terminal
+        // sessions) would otherwise keep every chat run planning with the box unticked.
+        mode: body.plan === true ? "plan" : body.mode === "plan" ? "" : body.mode || "",
         effort: body.effort || "",
         autoEffort: body.autoEffort || "",
         logText: typeof body.logText === "string" ? body.logText.slice(0, 300) : "",
