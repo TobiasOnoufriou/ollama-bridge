@@ -137,6 +137,10 @@
   .subtab button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
   .subtab.add { color: var(--accent); }
   @media (hover: none) { .subtab button.x { opacity: .7; } }
+  #subInfo { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 20px 0; font-size: 12px; color: var(--muted); }
+  #subInfo:empty { display: none; }
+  #subInfo b { color: var(--text); }
+  #subInfo .new-session { padding: 1px 8px; border-radius: 999px; background: var(--accent); color: var(--bg); font-weight: 600; }
 
   #messages { flex: 1; overflow-y: auto; padding: 20px; }
   #sessionHints:empty { display: none; }
@@ -318,7 +322,7 @@
   /* Composer: message box on its own row, controls underneath */
   .composer .inner { flex-wrap: wrap; align-items: center; }
   .composer textarea { flex: 1 1 100%; }
-  .composer #sendBtn { margin-left: auto; padding: 8px 18px; }
+  .composer #sendBtn, .composer #stopBtn { margin-left: auto; padding: 8px 18px; }
 
   /* Deleting projects */
   .project-row { position: relative; }
@@ -457,6 +461,7 @@
   </header>
 
   <div id="subTabs" role="tablist" aria-label="Sessions in this project"></div>
+  <div id="subInfo" aria-live="polite"></div>
   <div id="sessionHints"></div>
   <div id="messages"><div class="inner" id="list"></div></div>
 
@@ -471,6 +476,7 @@
       <label class="plan-toggle" title="Plan mode: the reply is a step-by-step plan instead of doing the task">
         <input type="checkbox" id="planMode"><span>Plan</span></label>
       <button class="primary" id="sendBtn">Send</button>
+      <button class="danger" id="stopBtn" hidden title="Stop the reply: Claude Code is killed and the local model stops generating">Stop</button>
     </div>
     <div class="hint">Enter to send, Shift+Enter for a new line. Claude sees this conversation through <code>local_history</code>.
       <button class="linkish" id="keysBtn" title="Shortcuts and tricks (?)">Shortcuts &amp; tricks</button></div>
@@ -622,7 +628,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 // sub: the project's current sub-session ("" = main); subs: its sessions from /api/sessions.
-const state = { projects: [], project: null, sub: "", subs: [], config: null, messages: [], sending: false, lastCount: -1 };
+const state = { projects: [], project: null, sub: "", subs: [], config: null, messages: [], sending: false, runId: "", stopping: false, lastCount: -1 };
 
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -1046,13 +1052,45 @@ async function loadSessions() {
 
 function renderSubTabs() {
   $("subTabs").hidden = !state.project;
-  const about = (s) => `${s.name}: ${s.messages ? `${s.messages} message${s.messages === 1 ? "" : "s"}, ${relTime(s.updated)}` : "no messages yet"}${s.id ? " · double-click to rename" : ""}`;
+  const about = (s) => `${s.name}: ${s.messages ? `${s.messages} message${s.messages === 1 ? "" : "s"}, ${relTime(s.updated)}` : "no messages yet"}` +
+    `${s.usage ? ` · ${usageLine(s.usage)}` : ""}${s.id ? " · double-click to rename" : ""}`;
   const html = state.subs.map((s) => `<div class="subtab ${s.id === state.sub ? "on" : ""}">
       <button role="tab" aria-selected="${s.id === state.sub}" data-sub="${esc(s.id)}" title="${esc(about(s))}">${esc(s.name)}</button>
       ${s.id ? `<button class="x" data-subdel="${esc(s.id)}" title="Delete ${esc(s.name)}" aria-label="Delete ${esc(s.name)}">✕</button>` : ""}</div>`).join("") +
     `<div class="subtab add"><button id="newSubBtn" title="New session: a separate conversation in this project, with its own Claude session">+ New</button></div>`;
   // Only touch the DOM when something changed, so the 10 s refresh doesn't eat clicks.
   if (html !== subsHtml) $("subTabs").innerHTML = subsHtml = html;
+  renderSubInfo();
+}
+
+// Token totals like lib.mjs sessionUsage(), from the messages already loaded so they update with every reply.
+function sessionUsage(messages) {
+  const u = { local: { replies: 0, in: 0, out: 0 }, claude: { replies: 0, in: 0, out: 0, cost: 0 } };
+  for (const m of messages) {
+    const t = m.from === "local" ? u.local : m.from === "claude" ? u.claude : null;
+    if (!t || !m.usage) continue;
+    t.replies++;
+    t.in += (m.usage.in || 0) + (m.usage.cacheRead || 0) + (m.usage.cacheWrite || 0);
+    t.out += m.usage.out || 0;
+    if (t === u.claude) u.claude.cost += m.usage.costUsd || 0;
+  }
+  return u;
+}
+const kTok = (n) => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n);
+function usageLine(u) {
+  const part = (label, t) => t.replies ? `${label}: ${t.replies} repl${t.replies === 1 ? "y" : "ies"}, ${kTok(t.in)} in / ${kTok(t.out)} out` : "";
+  const cost = u.claude.cost ? ` ($${u.claude.cost.toFixed(2)})` : "";
+  return [part("Claude", u.claude) + cost, part("Local", u.local)].filter(Boolean).join(" · ") || "no token usage yet";
+}
+
+// Which session you're in, a badge while it's still new, and its token usage so far.
+function renderSubInfo() {
+  if (!state.project) { $("subInfo").innerHTML = ""; return; }
+  const msgs = state.lastCount >= 0 ? state.messages || [] : [];
+  const fresh = state.lastCount >= 0 && msgs.length === 0;
+  $("subInfo").innerHTML = `<span>Session <b>${esc(subName())}</b></span>` +
+    (fresh ? `<span class="new-session" title="Nothing has been said in this session yet; Claude starts a new session for it">New session</span>`
+      : state.lastCount >= 0 ? `<span>${msgs.length} message${msgs.length === 1 ? "" : "s"} · ${esc(usageLine(sessionUsage(msgs)))}</span>` : "");
 }
 
 function selectSub(id) {
@@ -1164,6 +1202,7 @@ async function loadHistory(scroll = false) {
   state.messages = log.messages;
   if (!state.lastSent) state.lastSent = [...log.messages].reverse().find((m) => m.from === "human")?.content || "";
   renderMessages(scroll);
+  renderSubInfo();
 }
 
 // "qwen2.5-coder:14b" -> "Qwen 2.5 Coder 14B", "deepseek-r1:14b" -> "DeepSeek R1 14B", "qwen3.6-cc" -> "Qwen 3.6 (long context)"
@@ -1295,6 +1334,29 @@ function parsePrefixes(raw) {
   return { text: text.trim(), target, model, plan, tag };
 }
 
+// Stop button. Every request of one send shares a runId; Stop asks the server to cancel it, and the page stays
+// locked until the server answers, i.e. until the work has really stopped (the server holds a per-session lock
+// for the same reason).
+function setRunning(on) {
+  state.sending = on;
+  state.runId = on ? Math.random().toString(36).slice(2) : "";
+  state.stopping = false;
+  $("sendBtn").disabled = on;
+  $("sendBtn").hidden = on;
+  $("stopBtn").hidden = !on;
+  $("stopBtn").disabled = false;
+  $("stopBtn").textContent = "Stop";
+}
+
+async function stopRun() {
+  if (!state.sending || state.stopping) return;
+  state.stopping = true;
+  $("stopBtn").disabled = true;
+  $("stopBtn").textContent = "Stopping…";
+  try { await api("/api/cancel", { runId: state.runId }); }
+  catch (e) { toast(e.message, true); state.stopping = false; $("stopBtn").disabled = false; $("stopBtn").textContent = "Stop"; }
+}
+
 // override: { text, target, model, plan } from retry buttons; otherwise read from the composer.
 async function sendMessage(override = {}) {
   if (override instanceof Event) override = {};
@@ -1308,9 +1370,9 @@ async function sendMessage(override = {}) {
   const plan = override.plan ?? (p.plan || $("planMode").checked);
   const useHistory = $("useHistory").checked;
   const sub = state.sub;
-  state.sending = true;
+  setRunning(true);
+  const runId = state.runId;
   state.lastSent = raw;
-  $("sendBtn").disabled = true;
   if (override.text === undefined) $("input").value = "";
   autosize();
   const mine = { from: "human", content: override.logText || text, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) };
@@ -1348,7 +1410,7 @@ async function sendMessage(override = {}) {
     const typed = p.tag ? `you typed ${p.tag}` : null;
     let route = target === "smart" ? null : { to: target, reason: typed || override.reason || (target === "claude" ? "you chose Claude" : "you chose local"), by: "you" };
     if (!route) {
-      const r = await api("/api/route", { project: state.project, sub, prompt: text });
+      const r = await api("/api/route", { project: state.project, sub, prompt: text, runId });
       route = { to: r.route, reason: r.reason, by: r.by, effort: r.effort };
       mine.route = route;
       pending.from = route.to === "claude" ? "claude" : "local";
@@ -1362,24 +1424,33 @@ async function sendMessage(override = {}) {
         project: state.project, sub, prompt: text, ...claudeOpts(),
         ...(override.mode ? { mode: override.mode } : {}), ...(override.effort ? { effort: override.effort } : {}),
         autoEffort: target === "smart" ? route.effort : "", plan, useHistory, route,
-        logText: override.logText || "", exclude: override.exclude || [],
+        logText: override.logText || "", exclude: override.exclude || [], runId,
       });
-      if (out.isError) toast("Claude Code reported an error; see its reply", true);
+      if (out.stopped) toast("Stopped. Claude's reply so far isn't kept, but any edits it made are");
+      else if (out.isError) toast("Claude Code reported an error; see its reply", true);
     } else {
-      await api("/api/chat", { project: state.project, sub, prompt: text, model: localModel, useHistory, plan, projectContext: readProject, stepwise, progressId, route: target === "smart" || typed || override.reason ? route : null });
+      await api("/api/chat", { project: state.project, sub, prompt: text, model: localModel, useHistory, plan, projectContext: readProject, stepwise, progressId, runId, route: target === "smart" || typed || override.reason ? route : null });
     }
   } catch (e) {
-    pending.content = `Error: ${e.message}`;
-    pending.pending = false;
-    renderMessages(true);
-    document.querySelector(".msg:last-child .content")?.classList.add("error");
+    // Stopped local replies aren't logged: drop the pending pair and put the text back to edit or resend.
+    if (state.stopping) {
+      state.messages.splice(state.messages.indexOf(mine), 2);
+      if (!$("input").value) { $("input").value = raw; autosize(); }
+      renderMessages(true);
+      pending.content = "Stopped";
+      toast("Stopped");
+    } else {
+      pending.content = `Error: ${e.message}`;
+      pending.pending = false;
+      renderMessages(true);
+      document.querySelector(".msg:last-child .content")?.classList.add("error");
+    }
   } finally {
     clearInterval(timer);
     if (poll) clearInterval(poll);
-    state.sending = false;
-    $("sendBtn").disabled = false;
+    setRunning(false);
   }
-  if (!pending.content.startsWith("Error")) {
+  if (!/^(Error|Stopped)/.test(pending.content)) {
     state.lastCount = -1;
     await loadHistory(true);
   }
@@ -1479,8 +1550,8 @@ Continue? (You won't be asked again for this project.)`);
 // The server runs the whole loop; the page shows each stage and reloads the conversation at the end.
 async function runImplement(m) {
   if (state.sending || !state.project) return;
-  state.sending = true;
-  $("sendBtn").disabled = true;
+  setRunning(true);
+  const runId = state.runId;
   const progressId = Math.random().toString(36).slice(2);
   const pending = { from: "claude", model: "", content: "", pending: true };
   state.messages.push({ from: "human", content: `Implement the plan above${m.model ? ` (from ${prettyModel(m.model)})` : ""}`, ts: new Date().toISOString(),
@@ -1501,20 +1572,20 @@ async function runImplement(m) {
     const o = claudeOpts();
     const out = await api("/api/implement", {
       project: state.project, sub: state.sub, planTs: m.ts, progressId, model: o.model, effort: o.effort || "medium", fast: o.fast,
-      reviewMode: $("reviewMode").value,
+      reviewMode: $("reviewMode").value, runId,
     });
-    if (out.isError) toast("Claude Code reported an error; see its reply", true);
+    if (out.stopped) toast("Stopped. Any edits Claude made up to that point are still in the files");
+    else if (out.isError) toast("Claude Code reported an error; see its reply", true);
     else if (out.problems === 0) toast("Implemented, and the review found no problems");
     else if (out.fixed && out.fixChanged === 0) toast("Implemented; Claude checked the review's findings and changed nothing (false alarms)");
     else if (out.fixed) toast(out.recheckOk ? "Implemented; Claude fixed what the review found" : "Implemented; some review problems remain, see the re-check", !out.recheckOk);
     else if (out.problems) toast(`Implemented; the review found ${out.problems} problem${out.problems === 1 ? "" : "s"}`, true);
   } catch (e) {
-    toast(e.message, true);
+    toast(state.stopping ? "Stopped. Any edits Claude made are still in the files" : e.message, !state.stopping);
   } finally {
     clearInterval(timer);
     clearInterval(poll);
-    state.sending = false;
-    $("sendBtn").disabled = false;
+    setRunning(false);
   }
   state.lastCount = -1;
   await loadHistory(true);
@@ -1619,6 +1690,7 @@ document.querySelector(".target").addEventListener("click", (e) => {
   if (b) setTarget(b.dataset.target);
 });
 $("sendBtn").addEventListener("click", sendMessage);
+$("stopBtn").addEventListener("click", stopRun);
 $("input").addEventListener("input", autosize);
 $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }

@@ -2,7 +2,7 @@
 // Clear-cut cases are decided by rules (instant); the rest by asking the fast local model to classify.
 import fs from "node:fs";
 import path from "node:path";
-import { OLLAMA_URL, DEFAULT_MODEL, loadLog, defaultSub } from "./lib.mjs";
+import { OLLAMA_URL, DEFAULT_MODEL, cancelSignal, loadLog, defaultSub } from "./lib.mjs";
 
 const CLASSIFIER_PROMPT = `You route a user's request to one of two assistants. Reply with JSON only.
 
@@ -86,7 +86,7 @@ async function byModel(prompt, model) {
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(60000),
+    signal: cancelSignal(60000),
     body: JSON.stringify({
       model,
       stream: false,

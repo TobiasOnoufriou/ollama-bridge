@@ -11,7 +11,7 @@
 //   5. Write-up    the findings become the plan; anything the checks flagged is listed at the end
 // Every call returns JSON forced to a schema (Ollama structured outputs), so replies can't be malformed.
 import path from "node:path";
-import { OLLAMA_URL, DEFAULT_MODEL, loadLog, saveLog, projectDir, defaultSub } from "./lib.mjs";
+import { OLLAMA_URL, DEFAULT_MODEL, cancelSignal, loadLog, saveLog, projectDir, defaultSub } from "./lib.mjs";
 import { updateIndex, outlineText, pickFiles, definition, readText, cut } from "./context.mjs";
 
 const FILE_CHARS = 12000; // what one per-file question sees
@@ -22,7 +22,7 @@ export async function ask(model, system, user, schema, { numPredict = 700 } = {}
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(180000),
+    signal: cancelSignal(180000),
     body: JSON.stringify({
       model,
       stream: false,

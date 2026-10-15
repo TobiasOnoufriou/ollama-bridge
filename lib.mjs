@@ -1,7 +1,25 @@
 // Shared helpers for the Ollama bridge: per-project conversation log + Ollama chat call.
 import fs from "node:fs";
 import path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { HERE, loadConfig } from "./config.mjs";
+
+// Stop button: the UI server runs each chat/Claude request inside withCancel(), and every Ollama fetch and Claude
+// run picks the signal up here, so it needn't be passed through the planner, context and review code.
+const cancelStore = new AsyncLocalStorage();
+export const withCancel = (signal, fn) => cancelStore.run(signal, fn);
+// The current request's signal, combined with a timeout if given (no AbortSignal.any before Node 20).
+export function cancelSignal(timeoutMs) {
+  const stop = cancelStore.getStore();
+  const timeout = timeoutMs ? AbortSignal.timeout(timeoutMs) : null;
+  if (!stop || !timeout) return stop || timeout || undefined;
+  const ac = new AbortController();
+  for (const s of [stop, timeout]) {
+    if (s.aborted) ac.abort(s.reason);
+    else s.addEventListener("abort", () => ac.abort(s.reason), { once: true });
+  }
+  return ac.signal;
+}
 
 // Environment variables override config.json.
 const config = loadConfig();
@@ -80,10 +98,25 @@ export function clearLog(dir = projectDir(), sub = defaultSub()) {
   saveLog({ project: dir, ...(name ? { name, created } : {}), messages: [] }, dir, sub);
 }
 
-// Main plus every named sub-session: [{ id, name, messages, updated }], main first, then oldest first.
+// Token totals from a log's replies: { local: { replies, in, out }, claude: { replies, in, out, cost } }.
+// Claude's input counts cache reads/writes too, as that's what each resumed message re-reads.
+export function sessionUsage(messages) {
+  const u = { local: { replies: 0, in: 0, out: 0 }, claude: { replies: 0, in: 0, out: 0, cost: 0 } };
+  for (const m of messages) {
+    const t = m.from === "local" ? u.local : m.from === "claude" ? u.claude : null;
+    if (!t || !m.usage) continue;
+    t.replies++;
+    t.in += (m.usage.in || 0) + (m.usage.cacheRead || 0) + (m.usage.cacheWrite || 0);
+    t.out += m.usage.out || 0;
+    if (t === u.claude) u.claude.cost += m.usage.costUsd || 0;
+  }
+  return u;
+}
+
+// Main plus every named sub-session: [{ id, name, messages, updated, created, usage }], main first, then oldest first.
 export function listSessions(dir = projectDir()) {
   const main = loadLog(dir, "");
-  const out = [{ id: "", name: "Main", messages: main.messages.length, updated: main.messages.at(-1)?.ts || null }];
+  const out = [{ id: "", name: "Main", messages: main.messages.length, updated: main.messages.at(-1)?.ts || null, created: "", usage: sessionUsage(main.messages) }];
   let files = [];
   try {
     files = fs.readdirSync(sessionsDir(dir)).filter((f) => f.endsWith(".json") && SUB_RE.test(f.slice(0, -5)));
@@ -91,10 +124,10 @@ export function listSessions(dir = projectDir()) {
   const named = files.map((f) => {
     const id = f.slice(0, -5);
     const log = loadLog(dir, id);
-    return { id, name: log.name || id, messages: log.messages.length, updated: log.messages.at(-1)?.ts || null, created: log.created || "" };
+    return { id, name: log.name || id, messages: log.messages.length, updated: log.messages.at(-1)?.ts || null, created: log.created || "", usage: sessionUsage(log.messages) };
   });
   named.sort((a, b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
-  return [...out, ...named.map(({ created, ...s }) => s)];
+  return [...out, ...named];
 }
 
 export function sessionCount(dir) {
@@ -192,6 +225,7 @@ export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHis
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: cancelSignal(),
     body: JSON.stringify({
       model,
       stream: false,

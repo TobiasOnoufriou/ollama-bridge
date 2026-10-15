@@ -4,7 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { HERE } from "./config.mjs";
-import { chat, loadLog, saveLog, clearLog, subId, listSessions, createSession, renameSession, deleteSession } from "./lib.mjs";
+import { chat, loadLog, saveLog, clearLog, subId, listSessions, createSession, renameSession, deleteSession, withCancel } from "./lib.mjs";
 import { checkStatus, modelsWithRoles, effectiveConfig } from "./status.mjs";
 import { allProjects, addProject, removeProject, isKnownProject, claudeCodeProjects, completeDir } from "./projects.mjs";
 import { pickFolder, launchIn, CLAUDE_MODELS, START_MODES, EFFORT_LEVELS } from "./launch.mjs";
@@ -20,6 +20,42 @@ import { repoFor, listIssues, getIssue, issueMarkdown, issueBranch, issueSession
 
 // Live progress of step-by-step plans, by an id the page picks.
 const progress = new Map();
+
+// Stop button: running requests by an id the page picks (runId -> AbortController), and the sessions busy with a
+// chat, Claude or implement run. The lock is held until the work has really stopped (Claude killed, Ollama fetch
+// aborted), so a message sent straight after Stop can't run alongside the old one and race its log write or resume
+// the same Claude session.
+// A send can be several requests (route, then chat or Claude), and Stop can land between them, so a stopped runId
+// is remembered for a minute and any later request with it starts already stopped.
+const runs = new Map();
+const busy = new Set();
+const stoppedEarly = new Set();
+function cancelRun(runId) {
+  if (!runId) return false;
+  if (!stoppedEarly.has(runId)) {
+    stoppedEarly.add(runId);
+    setTimeout(() => stoppedEarly.delete(runId), 60000).unref();
+  }
+  const ac = runs.get(runId);
+  ac?.abort();
+  return !!ac;
+}
+async function cancellable(runId, lockKey, fn) {
+  const id = String(runId || "").slice(0, 64);
+  if (stoppedEarly.has(id)) throw Object.assign(new Error("Stopped"), { stopped: true });
+  if (lockKey && busy.has(lockKey)) throw Object.assign(new Error("Something is still running in this session; wait for it or stop it"), { status: 409 });
+  const ac = new AbortController();
+  if (id) runs.set(id, ac);
+  if (lockKey) busy.add(lockKey);
+  try {
+    return await withCancel(ac.signal, fn);
+  } catch (err) {
+    throw ac.signal.aborted ? Object.assign(new Error("Stopped"), { stopped: true }) : err;
+  } finally {
+    if (runs.get(id) === ac) runs.delete(id);
+    if (lockKey) busy.delete(lockKey);
+  }
+}
 
 // How the smart router decided, stored on the prompt's log entry so the UI can show it.
 function routeMeta(route) {
@@ -136,41 +172,42 @@ async function route(req, res, url) {
       const started = Date.now();
       const dir = projectParam(body.project);
       const sub = subParam(body.sub);
-      // Step-by-step plans: many small questions plus checks (planner.mjs), with progress the page can poll.
-      if (body.plan === true && body.stepwise === true) {
-        const id = String(body.progressId || "").slice(0, 64);
-        try {
-          const out = await planAndLog({
-            dir,
-            sub,
-            prompt: body.prompt,
-            model: body.model || undefined,
-            useHistory: body.useHistory !== false,
-            meta: routeMeta(body.route),
-            onProgress: (text) => id && progress.set(id, { text, at: Date.now() }),
-          });
-          return send(res, 200, { ...out, ms: Date.now() - started });
-        } finally {
-          progress.delete(id);
+      const out = await cancellable(body.runId, `${dir}|${sub}`, async () => {
+        // Step-by-step plans: many small questions plus checks (planner.mjs), with progress the page can poll.
+        if (body.plan === true && body.stepwise === true) {
+          const id = String(body.progressId || "").slice(0, 64);
+          try {
+            return await planAndLog({
+              dir,
+              sub,
+              prompt: body.prompt,
+              model: body.model || undefined,
+              useHistory: body.useHistory !== false,
+              meta: routeMeta(body.route),
+              onProgress: (text) => id && progress.set(id, { text, at: Date.now() }),
+            });
+          } finally {
+            progress.delete(id);
+          }
         }
-      }
-      // Project-aware: gather relevant code on this machine so the local model works from real names.
-      let context = null;
-      if (body.projectContext === true) {
-        try {
-          context = await projectContext(dir, body.prompt, { model: body.model || undefined });
-        } catch {}
-      }
-      const out = await chat({
-        from: "human",
-        prompt: body.prompt,
-        model: body.model || undefined,
-        useHistory: body.useHistory !== false,
-        plan: body.plan === true,
-        meta: routeMeta(body.route),
-        context,
-        dir,
-        sub,
+        // Project-aware: gather relevant code on this machine so the local model works from real names.
+        let context = null;
+        if (body.projectContext === true) {
+          try {
+            context = await projectContext(dir, body.prompt, { model: body.model || undefined });
+          } catch {}
+        }
+        return chat({
+          from: "human",
+          prompt: body.prompt,
+          model: body.model || undefined,
+          useHistory: body.useHistory !== false,
+          plan: body.plan === true,
+          meta: routeMeta(body.route),
+          context,
+          dir,
+          sub,
+        });
       });
       return send(res, 200, { ...out, ms: Date.now() - started });
     }
@@ -183,15 +220,16 @@ async function route(req, res, url) {
       const id = String(body.progressId || "").slice(0, 64);
       const reviewMode = ["fix", "review", "off"].includes(body.reviewMode) ? body.reviewMode : "fix";
       try {
-        const out = await implementAndReview({
+        const out = await cancellable(body.runId, `${dir}|${sub}`, () => implementAndReview({
           dir,
           sub,
           planMessage,
           opts: { model: body.model || "", effort: body.effort || "", fast: body.fast === true },
           reviewMode,
           onProgress: (text) => id && progress.set(id, { text, at: Date.now() }),
-        });
+        }));
         return send(res, 200, {
+          stopped: !!(out.impl?.stopped || out.fix?.stopped),
           isError: !!out.impl?.isError,
           problems: out.review?.problems.length ?? null,
           fixed: !!out.fix,
@@ -204,13 +242,16 @@ async function route(req, res, url) {
     }
     if (pathname === "/api/route") {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
-      return send(res, 200, await routePrompt(body.prompt, { dir: projectParam(body.project), sub: subParam(body.sub) }));
+      // No lock: routing writes nothing, and the chat or Claude request that follows takes it.
+      return send(res, 200, await cancellable(body.runId, "", () => routePrompt(body.prompt, { dir: projectParam(body.project), sub: subParam(body.sub) })));
     }
     if (pathname === "/api/claude") {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
-      const out = await runClaude({
-        dir: projectParam(body.project),
-        sub: subParam(body.sub),
+      const dir = projectParam(body.project);
+      const sub = subParam(body.sub);
+      const out = await cancellable(body.runId, `${dir}|${sub}`, () => runClaude({
+        dir,
+        sub,
         prompt: body.prompt,
         model: body.model || "",
         // The Plan box is the chat's only plan switch: a "Starts in: Plan mode" setting (meant for new terminal
@@ -223,8 +264,12 @@ async function route(req, res, url) {
         fast: body.fast === true,
         useHistory: body.useHistory !== false,
         meta: routeMeta(body.route),
-      });
+      }));
       return send(res, 200, out);
+    }
+    // Stop a running request. Fine to call when it has already finished.
+    if (pathname === "/api/cancel") {
+      return send(res, 200, { running: cancelRun(String(body.runId || "").slice(0, 64)) });
     }
     if (pathname === "/api/projects/add") return send(res, 200, { project: addProject(body.path) });
     if (pathname === "/api/projects/remove") {
@@ -313,7 +358,7 @@ export async function startUi({ port = DEFAULT_PORT, open = true } = {}) {
     try {
       await route(req, res, new URL(req.url, `http://${req.headers.host}`));
     } catch (err) {
-      send(res, 500, { error: err.message });
+      send(res, err.status || 500, { error: err.message, ...(err.stopped ? { stopped: true } : {}) });
     }
   });
   // Claude Code and slow local models can take minutes; don't let Node cut requests off at 5.

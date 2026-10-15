@@ -105,7 +105,8 @@ A project starts with one conversation, **Main**. The tabs under the project hea
 a separate conversation in the same folder (say "auth" and "docs"), with its own shared log and its own resumed
 Claude session, so unrelated work doesn't share history or Claude context. Double-click a tab to rename it, and
 use its ✕ to delete it. The page remembers which session you last had open in each project, and **Clear**
-empties just the open one.
+empties just the open one. The line under the tabs names the open session, marks it **New session** until its
+first message, and then shows its message count and token use (Claude and local, plus Claude's cost).
 
 The **Claude**, **Claude (local)** and **Start in Claude** buttons open their terminal tied to the open session
 (they set `OLLAMA_BRIDGE_SESSION`), so `ask_local` and `local_history` from that Claude Code use the same
@@ -258,6 +259,11 @@ Press <kbd>?</kbd> (or click **Shortcuts & tricks** under the message box) for t
 - **Drop text files** on the message box to paste them in as code blocks; Smart then keeps the question local
   because the model can see the file.
 - **↑** in an empty message box brings back your last message.
+- **Stop** (in place of Send while a reply is running) really stops it: Claude Code is killed and the local
+  model stops generating, including mid-way through a step-by-step plan or an Implement + review. A stopped
+  local reply isn't logged and your text goes back in the box; a stopped Claude run is logged as stopped, since
+  it may already have edited files. Each session runs one request at a time, so a new message waits for the
+  old one to finish stopping.
 - **Hover a message** for **Copy**, **Ask Claude instead** / **Retry locally**, and **Second opinion** (the
   reasoning model checks the answer).
 - **Keys:** <kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>/</kbd> jump to the message box; <kbd>Alt</kbd>+<kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd>

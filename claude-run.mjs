@@ -2,7 +2,7 @@
 // The prompt goes in on stdin, so it never passes through a shell.
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { loadLog, saveLog, defaultSub } from "./lib.mjs";
+import { loadLog, saveLog, defaultSub, cancelSignal } from "./lib.mjs";
 import { claudeArgs } from "./launch.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -46,15 +46,28 @@ function sharedContext(messages, sessionId, exclude = []) {
   );
 }
 
+// Kill the run and anything it started (on Windows a shell-launched claude.cmd is a cmd.exe with claude under it).
+function stop(child) {
+  if (IS_WIN && child.pid) spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).on("error", () => child.kill());
+  else child.kill();
+}
+
 async function runOnce(args, input, dir, env) {
+  const signal = cancelSignal();
+  if (signal?.aborted) return { code: null, out: "", err: "", json: null, stopped: true };
   const child = await spawnClaude(args, { cwd: path.resolve(dir), env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   let out = "", err = "";
   child.stdout.on("data", (d) => (out += d));
   child.stderr.on("data", (d) => (err += d));
+  child.stdin.on("error", () => {}); // killed before reading its input
   child.stdin.end(input);
-  const timer = setTimeout(() => child.kill(), TIMEOUT_MS);
+  const timer = setTimeout(() => stop(child), TIMEOUT_MS);
+  const onStop = () => stop(child);
+  signal?.addEventListener("abort", onStop, { once: true });
   const code = await new Promise((resolve) => child.once("close", resolve));
   clearTimeout(timer);
+  signal?.removeEventListener("abort", onStop);
+  if (signal?.aborted) return { code, out, err, json: null, stopped: true };
   let json = null;
   try {
     json = JSON.parse(out);
@@ -133,6 +146,11 @@ export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", m
     reply = out.trim() || err.trim() || `Claude Code exited with code ${code}`;
   }
   if (!reply) reply = err.trim() || "(no reply)";
+  // Stopped from the UI: kept in the log because Claude may already have edited files.
+  if (r.stopped) {
+    isError = true;
+    reply = "Stopped before finishing. Any edits Claude made up to that point are still in the files.";
+  }
   if (/not logged in|please run \/login/i.test(reply)) {
     isError = true;
     reply = "The Claude Code CLI isn't signed in on this machine. Open a terminal, run `claude`, type `/login` " +
@@ -165,5 +183,5 @@ export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", m
     fresh.claude = { ...fresh.claude, [profile]: { session, upTo: fresh.messages.length, ...(sessionCost != null ? { costTotal: sessionCost } : {}) } };
   }
   saveLog(fresh, dir, sub);
-  return { reply, model: label, ms, costUsd, usage, isError };
+  return { reply, model: label, ms, costUsd, usage, isError, ...(r.stopped ? { stopped: true } : {}) };
 }

@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { HERE, loadConfig } from "./config.mjs";
-import { OLLAMA_URL, DEFAULT_MODEL } from "./lib.mjs";
+import { OLLAMA_URL, DEFAULT_MODEL, cancelSignal } from "./lib.mjs";
 
 export const EMBED_MODEL = process.env.OLLAMA_BRIDGE_EMBED_MODEL || loadConfig().embedModel || "nomic-embed-text";
 const INDEX_DIR = path.join(HERE, "logs", "index");
@@ -157,7 +157,7 @@ async function embed(texts) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: EMBED_MODEL, input: texts, truncate: true }),
-    signal: AbortSignal.timeout(120000),
+    signal: cancelSignal(120000),
   });
   if (!res.ok) throw new Error(`embed ${res.status}`);
   return (await res.json()).embeddings.map((v) => {
@@ -174,6 +174,8 @@ async function canEmbed() {
     await embed(["ok"]);
     embedAvailable = true;
   } catch {
+    // Stopped from the UI: that says nothing about the model, so don't remember it.
+    if (cancelSignal()?.aborted) return false;
     embedAvailable = false;
   }
   return embedAvailable;
@@ -253,7 +255,7 @@ export async function pickFiles(request, outlineStr, model) {
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(90000),
+    signal: cancelSignal(90000),
     body: JSON.stringify({
       model,
       stream: false,
