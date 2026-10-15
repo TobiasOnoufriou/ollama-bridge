@@ -182,6 +182,41 @@ instead of doing the task: goal, questions and assumptions, numbered steps namin
 and how to verify. Plan messages get a **Plan** badge. Claude can ask for one too: `ask_local` takes
 `plan: true`, which pairs well with `deepseek-r1:14b` for a second opinion on an approach.
 
+#### Project-aware plans
+
+The local model has no tools, so on its own it would guess file and function names. Before a local plan, the
+bridge gathers relevant code on your machine and attaches it (Settings → Local model → **Project files**: for
+plans, for every message, or off). It combines three methods, so it doesn't rely on your words matching the code:
+
+1. **The model picks.** It reads an outline of the project (every file with its functions and classes) and
+   names the files and functions the change involves; the bridge attaches those files and the full definitions
+   of those functions. This is reasoning about structure, so "undo a todo I ticked off" finds `finishTask` in
+   `src/store.js`.
+2. **Search by meaning.** Code is split into chunks and embedded with `nomic-embed-text`; chunks closest in
+   meaning to the request are attached, even with no shared words. Large files show their most relevant parts.
+3. **Keyword search** on code-like names and the picker's search terms, as a backstop.
+
+Files you name are always attached in full, and dropped files still work. It skips `node_modules`, build output,
+binaries, `.env` files and anything in `.gitignore`. The index is cached per project in `logs/index/` and only
+changed files are re-read. It takes about 2 seconds and uses no Claude tokens; only the list of files used is
+kept in the conversation (shown under your message as *Read N parts of the project*).
+
+In a test on this repo, five requests worded to share no words with the code found the key code in four; the
+fifth attached the right files but not the one function the test checked for. It's much better than guessing,
+not perfect: check the file list, and drop in anything missing.
+
+#### Implement with Claude
+
+Plan replies have an **Implement with Claude** button. It sends the plan to Claude Code in that project with
+**Auto-accept edits** (it edits files without asking; you confirm once per project) at your Settings effort, or
+medium. Claude checks names against the real code and fixes gaps in the plan; in testing it added a UI button
+the local plan had missed. The plan goes in the prompt once (it isn't sent again as shared context) and the
+log shows just *Implement the plan above*.
+
+Edit runs get only Read, Edit, Write, Grep and Glob, with no MCP servers or skills; shell commands would be
+refused from the chat anyway. Implementing a small three-file change on Haiku took 38k input tokens, 8 turns and
+$0.034, against 323k tokens, 17 turns and $0.081 with the full toolset. Auto mode keeps the full toolset.
+
 ## Configuration
 
 Edit `config.json` (per machine, not committed) and re-run `node install.mjs` to pull and create any new models.
@@ -194,6 +229,7 @@ Edit `config.json` (per machine, not committed) and re-run `node install.mjs` to
 | `claudeLocalModel` | `qwen3.6` | claude-local runs the `<model>-cc` variant built from it |
 | `claudeLocalCtx` | `65536` | context size of that variant |
 | `ollamaUrl` | `http://localhost:11434` | everything |
+| `embedModel` | `nomic-embed-text` | project-aware plans (search by meaning); the installer offers to download it |
 
 Environment variables override the config:
 

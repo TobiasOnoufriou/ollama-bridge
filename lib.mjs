@@ -54,14 +54,14 @@ export function saveLog(log, dir = projectDir()) {
 
 
 // Convert the shared log into Ollama chat messages, newest last, trimmed to the char budget.
-function toOllamaMessages(entries) {
+function toOllamaMessages(entries, maxChars = MAX_HISTORY_CHARS) {
   const out = [];
   let total = 0;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
     const content = e.from === "local" ? e.content : `[${e.from === "claude" ? "Claude" : "Human"}] ${e.content}`;
     total += content.length;
-    if (total > MAX_HISTORY_CHARS && out.length > 0) break;
+    if (total > maxChars && out.length > 0) break;
     out.unshift({ role: e.from === "local" ? "assistant" : "user", content });
   }
   return out;
@@ -88,10 +88,22 @@ export function listProjects() {
 }
 
 // meta: extra fields stored on the prompt's log entry (e.g. how the smart router chose this model).
-export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true, plan = false, meta = {}, dir = projectDir() }) {
+// context: { text, sources } from context.mjs. The project code goes to the model with this prompt only; the log
+// keeps just the list of files used, so the shared conversation (and what Claude is later sent) stays small.
+export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true, plan = false, meta = {}, context = null, dir = projectDir() }) {
   const log = loadLog(dir);
-  const entry = { from, content: prompt, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}), ...meta };
+  const entry = {
+    from,
+    content: prompt,
+    ts: new Date().toISOString(),
+    ...(plan ? { mode: "plan" } : {}),
+    ...(context?.sources?.length ? { context: context.sources } : {}),
+    ...meta,
+  };
   const history = useHistory ? [...log.messages, entry] : [entry];
+  // Leave room in the model's context window for the attached code.
+  const messages = toOllamaMessages(history, context?.text ? Math.min(MAX_HISTORY_CHARS, 24000) : MAX_HISTORY_CHARS);
+  if (context?.text) messages[messages.length - 1].content = `${context.text}\n\n${messages[messages.length - 1].content}`;
 
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
@@ -99,8 +111,8 @@ export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHis
     body: JSON.stringify({
       model,
       stream: false,
-      options: { num_ctx: NUM_CTX },
-      messages: [{ role: "system", content: (system || SYSTEM_PROMPT) + (plan ? PLAN_PROMPT : "") }, ...toOllamaMessages(history)],
+      options: { num_ctx: Math.max(NUM_CTX, context?.text ? 32768 : 0) },
+      messages: [{ role: "system", content: (system || SYSTEM_PROMPT) + (plan ? PLAN_PROMPT : "") }, ...messages],
     }),
   });
   if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${await res.text()}`);

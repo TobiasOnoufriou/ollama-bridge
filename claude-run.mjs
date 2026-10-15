@@ -8,18 +8,28 @@ import { claudeArgs } from "./launch.mjs";
 const IS_WIN = process.platform === "win32";
 const CONTEXT_CHARS = 12000;
 const TIMEOUT_MS = 15 * 60 * 1000;
-// In Normal and Plan mode Claude can only read files from here (nobody is there to approve edits), so give it just
-// the read tools and skip MCP servers and skills: their descriptions are most of a fresh session's input tokens.
-const SLIM_ARGS = ["--tools", "Read,Grep,Glob", "--strict-mcp-config", "--disable-slash-commands"];
+// Runs from the chat have nobody to approve anything, so Claude only gets the tools it can actually use, and no
+// MCP servers or skills: tool descriptions are most of a session's input and are re-read on every turn.
+//  - Normal / Plan mode: read only.
+//  - Auto-accept edits: read and edit (shell commands would be refused anyway).
+//  - Auto mode: the full toolset, since it can approve its own actions.
+const LEAN = ["--strict-mcp-config", "--disable-slash-commands"];
+const PROFILES = {
+  read: ["--tools", "Read,Grep,Glob", ...LEAN],
+  edit: ["--tools", "Read,Edit,Write,Grep,Glob", ...LEAN],
+  full: [],
+};
 const AUTO_EFFORTS = new Set(["low", "medium"]); // Smart never picks more than medium
 
 // Shared-conversation messages Claude hasn't seen yet in this session (all of them for a new session),
 // so you, the local models and Claude stay in sync without resending the whole history every time.
-function sharedContext(messages, sessionId) {
+// exclude: timestamps of messages already included in the prompt (e.g. the plan being implemented).
+function sharedContext(messages, sessionId, exclude = []) {
   const lines = [];
   let total = 0;
   for (const m of messages.slice().reverse()) {
     if (sessionId && m.claudeSession === sessionId) continue; // Claude already has its own turns
+    if (exclude.includes(m.ts)) continue;
     const who = m.from === "human" ? "User" : m.from === "claude" ? "Claude" : `Local model (${m.model || "local"})`;
     const line = `[${who}] ${m.content}`;
     if (total + line.length > CONTEXT_CHARS) break;
@@ -72,15 +82,15 @@ function spawnClaude(args, opts) {
 // the system prompt and earlier turns then come from Claude's prompt cache instead of being sent fresh.
 // autoEffort: Smart's suggestion ("low" or "medium"), used only when no effort is set.
 // Returns { reply, model, ms, costUsd, usage, isError }.
-export async function runClaude({ dir, prompt, model = "", mode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {} }) {
+// logText: what the log shows for the prompt (e.g. a short label instead of a pasted plan).
+export async function runClaude({ dir, prompt, model = "", mode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [] }) {
   const usedEffort = effort || (AUTO_EFFORTS.has(autoEffort) ? autoEffort : "");
-  const slim = mode === "" || mode === "plan";
-  const profile = slim ? "read" : "full";
+  const profile = mode === "" || mode === "plan" ? "read" : mode === "acceptEdits" ? "edit" : "full";
   // claudeArgs validates model, mode and effort.
-  const base = ["-p", "--output-format", "json", ...claudeArgs({ model, mode, effort: usedEffort, fast }), ...(slim ? SLIM_ARGS : [])];
+  const base = ["-p", "--output-format", "json", ...claudeArgs({ model, mode, effort: usedEffort, fast }), ...PROFILES[profile]];
 
   const started = Date.now();
-  const entry = { from: "human", content: prompt, ts: new Date().toISOString(), ...(mode === "plan" ? { mode: "plan" } : {}), ...meta };
+  const entry = { from: "human", content: logText || prompt, ts: new Date().toISOString(), ...(mode === "plan" ? { mode: "plan" } : {}), ...meta };
   // Drop Ollama overrides in case this was started from claude-local, so this really talks to Claude.
   const env = { ...process.env };
   if (/localhost|127\.0\.0\.1/.test(env.ANTHROPIC_BASE_URL || "")) {
@@ -91,7 +101,7 @@ export async function runClaude({ dir, prompt, model = "", mode = "", effort = "
 
   const log = loadLog(dir);
   const saved = useHistory ? log.claude?.[profile] : null;
-  const context = (session, upTo) => (useHistory ? sharedContext(log.messages.slice(session ? upTo : 0), session) : "");
+  const context = (session, upTo) => (useHistory ? sharedContext(log.messages.slice(session ? upTo : 0), session, exclude) : "");
   let r = await runOnce(saved ? [...base, "--resume", saved.session] : base, prompt + context(saved?.session, saved?.upTo), dir, env);
   // The saved session can be gone (deleted, other machine, expired): start a new one with the full context.
   if (saved && (r.code !== 0 || r.json?.is_error) && /no conversation|not found|session/i.test(`${r.err} ${r.json?.result || ""}`)) {

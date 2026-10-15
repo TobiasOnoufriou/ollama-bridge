@@ -11,6 +11,7 @@ import { pickFolder, launchIn, CLAUDE_MODELS, START_MODES, EFFORT_LEVELS } from 
 import { routePrompt } from "./router.mjs";
 import { runClaude } from "./claude-run.mjs";
 import { usage } from "./usage.mjs";
+import { projectContext } from "./context.mjs";
 
 // How the smart router decided, stored on the prompt's log entry so the UI can show it.
 function routeMeta(route) {
@@ -78,6 +79,14 @@ async function route(req, res, url) {
     if (pathname === "/api/chat") {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
       const started = Date.now();
+      const dir = projectParam(body.project);
+      // Project-aware: gather relevant code on this machine so the local model works from real names.
+      let context = null;
+      if (body.projectContext === true) {
+        try {
+          context = await projectContext(dir, body.prompt, { model: body.model || undefined });
+        } catch {}
+      }
       const out = await chat({
         from: "human",
         prompt: body.prompt,
@@ -85,7 +94,8 @@ async function route(req, res, url) {
         useHistory: body.useHistory !== false,
         plan: body.plan === true,
         meta: routeMeta(body.route),
-        dir: projectParam(body.project),
+        context,
+        dir,
       });
       return send(res, 200, { ...out, ms: Date.now() - started });
     }
@@ -102,6 +112,8 @@ async function route(req, res, url) {
         mode: body.plan === true ? "plan" : body.mode || "",
         effort: body.effort || "",
         autoEffort: body.autoEffort || "",
+        logText: typeof body.logText === "string" ? body.logText.slice(0, 300) : "",
+        exclude: Array.isArray(body.exclude) ? body.exclude.slice(0, 20).map(String) : [],
         fast: body.fast === true,
         useHistory: body.useHistory !== false,
         meta: routeMeta(body.route),

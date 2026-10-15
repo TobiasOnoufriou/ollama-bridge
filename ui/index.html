@@ -342,6 +342,13 @@
   table.keys td { padding: 6px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
   table.keys td:first-child { white-space: nowrap; width: 1%; padding-right: 14px; }
 
+  /* Project files read + implement button */
+  details.ctx { margin-top: 6px; font-size: 12px; color: var(--muted); }
+  details.ctx summary { cursor: pointer; width: fit-content; }
+  details.ctx ul { margin: 4px 0 0; padding-left: 18px; }
+  details.ctx li { margin: 2px 0; }
+  .msg-actions button.impl { background: var(--accent); border-color: var(--accent); color: #fff; }
+
   /* Toast */
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0;
@@ -477,6 +484,11 @@
     <section>
       <h3>Local model <span>answers in this chat (Local, and Smart when it stays local)</span></h3>
       <div class="field"><label for="model">Model</label><select id="model"></select></div>
+      <div class="field"><label for="projectFiles">Project files</label><select id="projectFiles">
+          <option value="plans">Read the project for plans</option>
+          <option value="always">Read the project for every message</option>
+          <option value="off">Off</option></select>
+        <small>The bridge finds relevant code on this PC (outline, the model's picks, search by meaning) and attaches it, so plans use real names. No Claude tokens.</small></div>
       <label class="check-line"><input type="checkbox" id="useHistory" checked>
         <span>Shared history <small>send the project's conversation so the model remembers it</small></span></label>
     </section>
@@ -611,6 +623,14 @@ function usageMeta(m) {
   return `<span class="usage-meta">${bits.join(" · ")}</span>`;
 }
 
+// "Read 6 parts of the project": what the bridge attached for the local model, and why.
+function contextList(m) {
+  if (!m.context?.length) return "";
+  const files = new Set(m.context.map((c) => c.path)).size;
+  return `<details class="ctx"><summary>Read ${m.context.length} part${m.context.length === 1 ? "" : "s"} of the project (${files} file${files === 1 ? "" : "s"})</summary><ul>${
+    m.context.map((c) => `<li><code>${esc(c.path)}${c.lines ? `:${esc(c.lines)}` : ""}</code> ${esc(c.why)}</li>`).join("")}</ul></details>`;
+}
+
 function msgHtml(m, i) {
   const kind = m.from === "claude" ? "claude" : m.from === "human" ? "human" : "local";
   const name = kind === "claude" ? "Claude" : kind === "human" ? "You" : "Local model";
@@ -620,13 +640,14 @@ function msgHtml(m, i) {
   const route = m.route ? `<span class="route-chip to-${m.route.to}" title="${esc(m.route.by === "you" ? "Chosen by you" : m.route.by === "rules" ? "Decided by a rule" : "Decided by the local classifier")}">${m.route.by === "you" ? "→" : "Smart →"} <b>${m.route.to === "claude" ? "Claude" : "Local"}</b> · ${esc(m.route.reason)}</span>` : "";
   const acts = m.pending ? "" : `<div class="msg-actions">
       <button data-act="copy" title="Copy this message">Copy</button>
+      ${kind === "local" && m.mode === "plan" ? `<button class="impl" data-act="implement" title="Send this plan to Claude Code to carry out, editing files (Auto-accept edits)">Implement with Claude</button>` : ""}
       ${kind !== "human" ? `<button data-act="${kind === "claude" ? "local" : "claude"}" title="Send the same prompt to ${kind === "claude" ? "the local model" : "Claude Code"}">${kind === "claude" ? "Retry locally" : "Ask Claude instead"}</button>
       <button data-act="second" title="Ask the reasoning model to check this answer">Second opinion</button>` : ""}
     </div>`;
   return `<div class="msg ${kind} ${m.pending ? "pending" : ""} ${m.error ? "err" : ""}" data-i="${i}">${acts}
     <div class="avatar">${letter}</div>
     <div class="bubble"><div class="who"><span class="n">${name}</span>${model}${time}${route}${usageMeta(m)}</div>
-    <div class="content">${m.pending ? esc(m.content) : renderMarkdown(m.content)}</div></div></div>`;
+    <div class="content">${m.pending ? esc(m.content) : renderMarkdown(m.content)}</div>${contextList(m)}</div></div>`;
 }
 
 function renderMessages(scroll) {
@@ -984,14 +1005,18 @@ async function sendMessage(override = {}) {
   $("sendBtn").disabled = true;
   if (override.text === undefined) $("input").value = "";
   autosize();
-  const mine = { from: "human", content: text, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) };
+  const mine = { from: "human", content: override.logText || text, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) };
+  // Project files: attach relevant code to local plans (or every local message), per Settings.
+  const pf = $("projectFiles").value;
+  const readProject = pf === "always" || (pf === "plans" && plan);
   if (target !== "smart" && (p.tag || override.reason)) {
     mine.route = { to: target === "claude" ? "claude" : "local", reason: p.tag ? `you typed ${p.tag}` : override.reason, by: "you" };
   }
   state.messages.push(mine);
   const pending = { from: target === "claude" ? "claude" : "local", model: target === "local" ? localModel : "", content: "", pending: true, ...(plan ? { mode: "plan" } : {}) };
   state.messages.push(pending);
-  let verb = target === "smart" ? "Routing" : target === "claude" ? (plan ? "Claude Code is planning" : "Claude Code is working") : plan ? "Planning" : "Thinking";
+  const localVerb = () => (readProject ? (plan ? "Reading the project and planning" : "Reading the project") : plan ? "Planning" : "Thinking");
+  let verb = target === "smart" ? "Routing" : target === "claude" ? (plan ? "Claude Code is planning" : "Claude Code is working") : localVerb();
   const started = Date.now();
   const tick = () => {
     pending.content = `${verb}… ${Math.round((Date.now() - started) / 1000)}s`;
@@ -1010,15 +1035,20 @@ async function sendMessage(override = {}) {
       mine.route = route;
       pending.from = route.to === "claude" ? "claude" : "local";
       pending.model = route.to === "local" ? localModel : "";
-      verb = route.to === "claude" ? (plan ? "Claude Code is planning" : "Claude Code is working") : plan ? "Planning" : "Thinking";
+      verb = route.to === "claude" ? (plan ? "Claude Code is planning" : "Claude Code is working") : localVerb();
       renderMessages(true);
       tick();
     }
     if (route.to === "claude") {
-      const out = await api("/api/claude", { project: state.project, prompt: text, ...claudeOpts(), autoEffort: target === "smart" ? route.effort : "", plan, useHistory, route });
+      const out = await api("/api/claude", {
+        project: state.project, prompt: text, ...claudeOpts(),
+        ...(override.mode ? { mode: override.mode } : {}), ...(override.effort ? { effort: override.effort } : {}),
+        autoEffort: target === "smart" ? route.effort : "", plan, useHistory, route,
+        logText: override.logText || "", exclude: override.exclude || [],
+      });
       if (out.isError) toast("Claude Code reported an error; see its reply", true);
     } else {
-      await api("/api/chat", { project: state.project, prompt: text, model: localModel, useHistory, plan, route: target === "smart" || typed || override.reason ? route : null });
+      await api("/api/chat", { project: state.project, prompt: text, model: localModel, useHistory, plan, projectContext: readProject, route: target === "smart" || typed || override.reason ? route : null });
     }
   } catch (e) {
     pending.content = `Error: ${e.message}`;
@@ -1112,6 +1142,32 @@ document.addEventListener("mousemove", (e) => {
   tipEl.style.top = `${e.clientY - r.height - 10}px`;
 });
 
+// Hand a local plan to Claude Code to carry out. It edits files without asking (Auto-accept edits), so confirm
+// once per project; effort is your Settings choice, or medium.
+function implementPlan(m) {
+  const key = `implementOk:${state.project}`;
+  if (store.get(key) !== "1") {
+    const ok = confirm(`Claude Code will carry out this plan in ${basename(state.project)} and edit files without asking about each change (Auto-accept edits). It can't run shell commands from here.
+
+Continue? (You won't be asked again for this project.)`);
+    if (!ok) return;
+    store.set(key, "1");
+  }
+  sendMessage({
+    text:
+      "Carry out this plan, written by a local model from excerpts of this project. Check file and function names " +
+      "against the real code first; where the plan is wrong or incomplete, follow the code and say what you changed. " +
+      "Finish with a short summary of the edits.\n\n<plan>\n" + m.content + "\n</plan>",
+    logText: `Implement the plan above${m.model ? ` (from ${prettyModel(m.model)})` : ""}`,
+    target: "claude",
+    reason: "implementing the local plan",
+    plan: false,
+    mode: "acceptEdits",
+    effort: $("effort").value || "medium",
+    exclude: [m.ts],
+  });
+}
+
 function openUsage() { $("usageDlg").showModal(); loadUsage(); }
 
 async function clearHistory() {
@@ -1153,6 +1209,7 @@ $("list").addEventListener("click", async (e) => {
     }
     const prompt = [...state.messages.slice(0, i)].reverse().find((x) => x.from === "human")?.content;
     if (!prompt) return;
+    if (act.dataset.act === "implement") return implementPlan(m);
     if (act.dataset.act === "claude") sendMessage({ text: prompt, target: "claude", reason: "retried with Claude" });
     if (act.dataset.act === "local") sendMessage({ text: prompt, target: "local", reason: "retried locally" });
     if (act.dataset.act === "second") sendMessage({ text: `Second opinion: is this answer right? Point out mistakes or a better approach, briefly.\n\nQuestion: ${prompt}\n\nAnswer:\n${m.content}`, target: "local", model: state.config?.reasoningModel || "deepseek-r1:14b", reason: "second opinion" });
@@ -1166,7 +1223,7 @@ $("list").addEventListener("click", async (e) => {
   } catch { btn.textContent = "Copy failed"; }
   setTimeout(() => (btn.textContent = "Copy"), 1500);
 });
-for (const id of ["model", "claudeModel", "effort", "localModel", "startMode"]) {
+for (const id of ["model", "claudeModel", "effort", "localModel", "startMode", "projectFiles"]) {
   $(id).addEventListener("change", () => { store.set(id, $(id).value); renderSummary(); });
 }
 for (const id of ["fastMode", "useHistory"]) {
@@ -1283,6 +1340,7 @@ $("closeDlg").addEventListener("click", () => $("statusDlg").close());
   await loadProjects();
   if (store.get("planMode") === "1") $("planMode").checked = true;
   if (store.get("useHistory") === "0") $("useHistory").checked = false;
+  if (["plans", "always", "off"].includes(store.get("projectFiles"))) $("projectFiles").value = store.get("projectFiles");
   setTarget(["local", "smart", "claude"].includes(store.get("target")) ? store.get("target") : "smart");
   await Promise.all([loadHistory(true), loadModels(), loadLaunchOptions()]);
   loadStatus();

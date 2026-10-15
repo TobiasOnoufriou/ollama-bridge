@@ -2,7 +2,8 @@
 // Chat with the local model yourself, in the same per-project log Claude uses.
 // Run from a project folder:  local-chat [model]   (or: node /path/to/ollama-bridge/chat.mjs [model])
 import readline from "node:readline/promises";
-import { chat, loadLog, logPath, DEFAULT_MODEL } from "./lib.mjs";
+import { chat, loadLog, logPath, projectDir, DEFAULT_MODEL } from "./lib.mjs";
+import { projectContext } from "./context.mjs";
 
 const model = process.argv.slice(2).find((a) => !a.startsWith("--")) || DEFAULT_MODEL;
 const log = loadLog();
@@ -26,7 +27,13 @@ for (;;) {
     continue;
   }
   try {
-    const { reply } = await chat({ from: "human", prompt: line, model, plan });
+    // Plans get relevant project code attached, so the model uses real file and function names.
+    let context = null;
+    if (plan) {
+      context = await projectContext(projectDir(), line, { model }).catch(() => null);
+      if (context?.sources.length) console.log(`(read ${context.sources.length} parts of the project: ${[...new Set(context.sources.map((s) => s.path))].slice(0, 6).join(", ")})`);
+    }
+    const { reply } = await chat({ from: "human", prompt: line, model, plan, context });
     console.log(`\n${model}> ${reply}\n`);
   } catch (err) {
     console.error(`Error: ${err.message}`);

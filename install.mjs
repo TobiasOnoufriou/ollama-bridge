@@ -206,7 +206,8 @@ async function setupModels(cfg) {
     return false;
   }
   let installed = await installedModels(cfg.ollamaUrl);
-  const wanted = [...new Set([cfg.bridgeModel, cfg.reasoningModel, cfg.claudeLocalModel])];
+  // embedModel powers project-aware plans (search by meaning); small (~274 MB).
+  const wanted = [...new Set([cfg.bridgeModel, cfg.reasoningModel, cfg.claudeLocalModel, cfg.embedModel || "nomic-embed-text"])];
   for (const model of wanted) {
     if (installed.has(withTag(model))) {
       ok(`${model} already installed`);
