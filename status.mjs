@@ -37,9 +37,30 @@ export async function modelsWithRoles(cfg = effectiveConfig()) {
     [withTag(cfg.reasoningModel)]: "reasoning",
     [withTag(cfg.claudeLocalVariant)]: "claude-local",
   };
-  return data.models
-    .map((m) => ({ name: m.name, sizeGB: +(m.size / 1e9).toFixed(1), role: roles[m.name] || null }))
-    .sort((a, b) => (b.role ? 1 : 0) - (a.role ? 1 : 0) || a.name.localeCompare(b.name));
+  const models = await Promise.all(
+    data.models.map(async (m) => {
+      // Ollama reports what each model supports; claude-local needs real tool calling.
+      let caps = [];
+      try {
+        const res = await fetch(`${cfg.ollamaUrl}/api/show`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: m.name }),
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.ok) caps = (await res.json()).capabilities || [];
+      } catch {}
+      return {
+        name: m.name,
+        sizeGB: +(m.size / 1e9).toFixed(1),
+        role: roles[m.name] || null,
+        tools: caps.includes("tools"),
+        // Tested: these advertise tools but write tool calls as text or ignore them, so Claude Code can't use them.
+        toolsUnreliable: /^(qwen2\.5-coder|deepseek-r1)[:-]/.test(m.name),
+      };
+    }),
+  );
+  return models.sort((a, b) => (b.role ? 1 : 0) - (a.role ? 1 : 0) || a.name.localeCompare(b.name));
 }
 
 function claudeVersion() {

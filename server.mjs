@@ -26,6 +26,12 @@ const TOOLS = [
           type: "boolean",
           description: "Include the shared conversation history (default true). Set false for one-off tasks to keep it fast.",
         },
+        plan: {
+          type: "boolean",
+          description:
+            "Plan mode: the model returns a step-by-step plan (goal, questions, steps, risks, verification) instead of " +
+            `doing the task. Pairs well with model "${REASONING_MODEL}" for a second opinion on an approach.`,
+        },
       },
       required: ["prompt"],
     },
@@ -58,6 +64,7 @@ async function callTool(name, args = {}) {
         prompt: args.prompt,
         model: args.model || undefined,
         useHistory: args.use_history !== false,
+        plan: args.plan === true,
       });
       return `[${model}]\n${reply}`;
     }

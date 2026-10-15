@@ -7,7 +7,7 @@ import { HERE } from "./config.mjs";
 import { chat, loadLog, saveLog } from "./lib.mjs";
 import { checkStatus, modelsWithRoles, effectiveConfig } from "./status.mjs";
 import { allProjects, addProject, removeProject, isKnownProject, claudeCodeProjects, completeDir } from "./projects.mjs";
-import { pickFolder, launchIn } from "./launch.mjs";
+import { pickFolder, launchIn, CLAUDE_MODELS, START_MODES } from "./launch.mjs";
 
 const DEFAULT_PORT = 4317;
 const INDEX = path.join(HERE, "ui", "index.html");
@@ -47,6 +47,9 @@ async function route(req, res, url) {
   }
   if (req.method === "GET" && pathname === "/api/config") return send(res, 200, { ...effectiveConfig(), startDir });
   if (req.method === "GET" && pathname === "/api/projects") return send(res, 200, allProjects(startDir));
+  if (req.method === "GET" && pathname === "/api/launch-options") {
+    return send(res, 200, { claudeModels: CLAUDE_MODELS, startModes: START_MODES });
+  }
   if (req.method === "GET" && pathname === "/api/complete") return send(res, 200, completeDir(url.searchParams.get("path")));
   if (req.method === "GET" && pathname === "/api/suggestions") {
     const listed = new Set(allProjects(startDir).map((p) => p.project.toLowerCase()));
@@ -70,6 +73,7 @@ async function route(req, res, url) {
         prompt: body.prompt,
         model: body.model || undefined,
         useHistory: body.useHistory !== false,
+        plan: body.plan === true,
         dir: projectParam(body.project),
       });
       return send(res, 200, { ...out, ms: Date.now() - started });
@@ -83,7 +87,7 @@ async function route(req, res, url) {
       const dir = projectParam(body.project);
       // Only open terminals in folders that are on the project list.
       if (!isKnownProject(dir, startDir)) return send(res, 400, { error: "Add the folder as a project first" });
-      await launchIn(dir, body.what);
+      await launchIn(dir, body.what, { model: body.model || "", mode: body.mode || "" });
       return send(res, 200, { ok: true });
     }
     if (pathname === "/api/reset") {

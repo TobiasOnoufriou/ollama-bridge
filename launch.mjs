@@ -64,14 +64,35 @@ export const LAUNCH_TARGETS = {
   folder: "the file manager",
 };
 
+// Claude Code model aliases (always the latest of each) and the modes it can start in.
+export const CLAUDE_MODELS = { "": "Default", fable: "Fable", opus: "Opus", sonnet: "Sonnet", haiku: "Haiku" };
+export const START_MODES = {
+  "": "Normal (ask before edits)",
+  plan: "Plan mode (research and plan, no edits)",
+  acceptEdits: "Auto-accept edits",
+  auto: "Auto mode",
+};
+// Model names go straight into a shell command, so only allow characters model ids actually use.
+const MODEL_RE = /^[A-Za-z0-9._:\/\-\[\]]{1,100}$/;
+
+function claudeFlags({ model, mode }, modelFlag) {
+  if (model && !MODEL_RE.test(model)) throw new Error(`Invalid model name: ${model}`);
+  if (mode && !(mode in START_MODES)) throw new Error(`Unknown start mode: ${mode}`);
+  return [...(model ? [modelFlag, model] : []), ...(mode ? ["--permission-mode", mode] : [])].join(" ");
+}
+
 // Shell command to run in the new terminal for each target (null = just a shell).
-function commandFor(what) {
-  if (what === "claude") return "claude";
-  if (what === "local") return IS_WIN ? `& '${path.join(HERE, "ollama-bridge.cmd").replace(/'/g, "''")}' claude` : `${shQuote(path.join(HERE, "ollama-bridge"))} claude`;
+export function commandFor(what, opts) {
+  if (what === "claude") return `claude ${claudeFlags(opts, "--model")}`.trim();
+  if (what === "local") {
+    const bridge = IS_WIN ? `& '${path.join(HERE, "ollama-bridge.cmd").replace(/'/g, "''")}'` : shQuote(path.join(HERE, "ollama-bridge"));
+    return `${bridge} claude ${claudeFlags(opts, "-Model")}`.trim();
+  }
   return null;
 }
 
-export async function launchIn(dir, what) {
+// opts: { model, mode } for the claude and local targets; model is a Claude alias/id or an Ollama model name.
+export async function launchIn(dir, what, opts = {}) {
   if (!(what in LAUNCH_TARGETS)) throw new Error(`Unknown launch target: ${what}`);
   if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`Folder not found: ${dir}`);
   const name = path.basename(dir) || dir;
@@ -80,7 +101,7 @@ export async function launchIn(dir, what) {
     if (IS_WIN) return detached("explorer", [dir]);
     return detached(IS_MAC ? "open" : "xdg-open", [dir]);
   }
-  const cmd = commandFor(what);
+  const cmd = commandFor(what, opts);
 
   if (IS_WIN) {
     const ps = ["powershell", "-NoExit", ...(cmd ? ["-Command", cmd] : [])];

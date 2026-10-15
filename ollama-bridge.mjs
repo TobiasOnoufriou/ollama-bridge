@@ -33,6 +33,9 @@ ${bold("Usage:")} ollama-bridge <command> [options]
   ${cyan("open")} <what> [folder]         Open a new window in a project folder. <what> is one of:
                               claude (Claude Code), local (Claude Code on the local model),
                               terminal (a plain shell) or folder (the file manager)
+                              --model <name>  Claude model (fable, opus, sonnet, haiku) or
+                                              Ollama model for local
+                              --plan          start in plan mode (or --mode acceptEdits|auto)
   ${cyan("reset")} [--yes]               Clear this folder's shared log
   ${cyan("install")} [--yes]             Run the installer (safe to re-run)
   ${cyan("help")}                        Show this help
@@ -123,14 +126,17 @@ switch (cmd) {
   }
 
   case "open": {
-    const [what, folder = "."] = args;
+    // ollama-bridge open <what> [folder] [--model name] [--plan | --mode plan|acceptEdits|auto]
+    const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : "");
+    const positional = args.filter((a, i) => !a.startsWith("--") && !["--model", "--mode"].includes(args[i - 1]));
+    const [what, folder = "."] = positional;
     if (!(what in LAUNCH_TARGETS)) {
-      console.error(red(`Usage: ollama-bridge open <${Object.keys(LAUNCH_TARGETS).join("|")}> [folder]`));
+      console.error(red(`Usage: ollama-bridge open <${Object.keys(LAUNCH_TARGETS).join("|")}> [folder] [--model name] [--plan]`));
       process.exit(1);
     }
     try {
       const dir = resolveUserPath(folder);
-      await launchIn(dir, what);
+      await launchIn(dir, what, { model: opt("--model"), mode: flag("--plan") ? "plan" : opt("--mode") });
       console.log(green(`Opened ${LAUNCH_TARGETS[what]} in ${dir}`));
     } catch (err) {
       console.error(red(err.message));

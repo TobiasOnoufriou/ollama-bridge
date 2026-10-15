@@ -224,6 +224,21 @@
   #suggestions .project .meta { font-family: var(--mono); }
   .add-dlg .section-label { padding: 4px 18px 6px; }
 
+  /* Launch settings + plan mode */
+  .launch-opts { display: flex; gap: 6px 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .launch-opts label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .launch-opts select { padding: 3px 6px; font-size: 12px; max-width: 220px; }
+  .plan-toggle {
+    display: flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--border);
+    border-radius: var(--radius); cursor: pointer; user-select: none; color: var(--muted); font-size: 13px;
+  }
+  .plan-toggle input { margin: 0; accent-color: var(--accent); }
+  .plan-toggle:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .badge-plan {
+    font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    padding: 1px 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent);
+  }
+
   /* Deleting projects */
   .project-row { position: relative; }
   .project-row .project { padding-right: 36px; }
@@ -292,6 +307,11 @@
         <span class="sep"></span>
         <button class="ghost danger-text" id="removeBtn" title="Delete this project from the list">Delete</button>
       </div>
+      <div class="launch-opts">
+        <label title="Model for the Claude button">Claude model <select id="claudeModel"></select></label>
+        <label title="Ollama model for the Claude (local) button. Only models that can make real tool calls work.">Local model <select id="localModel"></select></label>
+        <label title="How Claude Code starts. Plan mode researches and proposes a plan before changing anything.">Start in <select id="startMode"></select></label>
+      </div>
     </div>
     <div class="controls">
       <select id="model" title="Model to reply"></select>
@@ -305,6 +325,8 @@
   <div class="composer">
     <div class="inner">
       <textarea id="input" rows="1" placeholder="Message the local model…"></textarea>
+      <label class="plan-toggle" title="Plan mode: the model replies with a step-by-step plan instead of doing the task">
+        <input type="checkbox" id="planMode"><span>Plan</span></label>
       <button class="primary" id="sendBtn">Send</button>
     </div>
     <div class="hint">Enter to send, Shift+Enter for a new line. Claude sees this conversation through <code>local_history</code>.</div>
@@ -432,7 +454,7 @@ function msgHtml(m) {
   const name = kind === "claude" ? "Claude" : kind === "human" ? "You" : "Local model";
   const letter = kind === "claude" ? "C" : kind === "human" ? "Y" : "L";
   const time = m.ts ? `<time>${new Date(m.ts).toLocaleString()}</time>` : "";
-  const model = m.model ? `<span class="model">${esc(m.model)}</span>` : "";
+  const model = (m.model ? `<span class="model">${esc(m.model)}</span>` : "") + (m.mode === "plan" ? '<span class="badge-plan">Plan</span>' : "");
   return `<div class="msg ${kind} ${m.pending ? "pending" : ""}">
     <div class="avatar">${letter}</div>
     <div class="bubble"><div class="who"><span class="n">${name}</span>${model}${time}</div>
@@ -477,8 +499,12 @@ const LAUNCH_LABEL = { claude: "Claude Code", local: "Claude Code (local model)"
 async function launch(what) {
   if (!state.project) return;
   try {
-    await api("/api/launch", { project: state.project, what });
-    toast(`Opened ${LAUNCH_LABEL[what]} in ${basename(state.project)}`);
+    const model = what === "claude" ? $("claudeModel").value : what === "local" ? $("localModel").value : "";
+    const mode = what === "claude" || what === "local" ? $("startMode").value : "";
+    await api("/api/launch", { project: state.project, what, model, mode });
+    const detail = [model && $(what === "claude" ? "claudeModel" : "localModel").selectedOptions[0].textContent,
+      mode && $("startMode").selectedOptions[0].textContent.replace(/ \(.*/, "")].filter(Boolean).join(", ");
+    toast(`Opened ${LAUNCH_LABEL[what]} in ${basename(state.project)}${detail ? ` (${detail})` : ""}`);
   } catch (e) { toast(e.message, true); }
 }
 
@@ -649,9 +675,32 @@ async function loadModels() {
     sel.innerHTML = models.map((m) =>
       `<option value="${esc(m.name)}">${esc(m.name)}${m.role ? ` (${m.role})` : ""}</option>`).join("");
     sel.value = models.some((m) => m.name === saved) ? saved : def || models[0]?.name || "";
+
+    // Claude (local) needs a model that makes real tool calls; list those, the configured one first.
+    const local = $("localModel");
+    const usable = models.filter((m) => m.tools && !m.toolsUnreliable);
+    const configured = models.find((m) => m.role === "claude-local");
+    local.innerHTML = `<option value="">${esc(configured ? configured.name.replace(/:latest$/, "") : "From config")} (default)</option>` +
+      usable.filter((m) => m !== configured).map((m) => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join("") +
+      models.filter((m) => !m.tools || m.toolsUnreliable).map((m) =>
+        `<option value="${esc(m.name)}" disabled>${esc(m.name)} (no reliable tool calls)</option>`).join("");
+    const savedLocal = store.get("localModel");
+    if (usable.some((m) => m.name === savedLocal)) local.value = savedLocal;
   } catch {
     sel.innerHTML = `<option value="">Ollama not running</option>`;
+    $("localModel").innerHTML = `<option value="">Ollama not running</option>`;
   }
+}
+
+async function loadLaunchOptions() {
+  const { claudeModels, startModes } = await api("/api/launch-options");
+  const fill = (id, opts, key) => {
+    $(id).innerHTML = Object.entries(opts).map(([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join("");
+    const saved = store.get(key);
+    if (saved !== null && saved in opts) $(id).value = saved;
+  };
+  fill("claudeModel", claudeModels, "claudeModel");
+  fill("startMode", startModes, "startMode");
 }
 
 async function loadStatus() {
@@ -678,22 +727,24 @@ async function sendMessage() {
   const text = $("input").value.trim();
   if (!text || state.sending || !state.project) return;
   const model = $("model").value;
+  const plan = $("planMode").checked;
   state.sending = true;
   $("sendBtn").disabled = true;
   $("input").value = "";
   autosize();
-  state.messages.push({ from: "human", content: text, ts: new Date().toISOString() });
-  const pending = { from: "local", model, content: "Thinking… 0s", pending: true };
+  state.messages.push({ from: "human", content: text, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) });
+  const verb = plan ? "Planning" : "Thinking";
+  const pending = { from: "local", model, content: `${verb}… 0s`, pending: true, ...(plan ? { mode: "plan" } : {}) };
   state.messages.push(pending);
   renderMessages(true);
   const started = Date.now();
   const timer = setInterval(() => {
-    pending.content = `Thinking… ${Math.round((Date.now() - started) / 1000)}s`;
+    pending.content = `${verb}… ${Math.round((Date.now() - started) / 1000)}s`;
     const el = document.querySelector(".msg.pending .content");
     if (el) el.textContent = pending.content;
   }, 1000);
   try {
-    await api("/api/chat", { project: state.project, prompt: text, model, useHistory: $("useHistory").checked });
+    await api("/api/chat", { project: state.project, prompt: text, model, useHistory: $("useHistory").checked, plan });
   } catch (e) {
     pending.content = `Error: ${e.message}`;
     pending.pending = false;
@@ -748,6 +799,14 @@ $("list").addEventListener("click", async (e) => {
   setTimeout(() => (btn.textContent = "Copy"), 1500);
 });
 $("model").addEventListener("change", () => store.set("model", $("model").value));
+for (const id of ["claudeModel", "localModel", "startMode"]) {
+  $(id).addEventListener("change", () => store.set(id, $(id).value));
+}
+$("planMode").addEventListener("change", () => {
+  const on = $("planMode").checked;
+  store.set("planMode", on ? "1" : "");
+  $("input").placeholder = on ? "Describe what you want planned…" : "Message the local model…";
+});
 $("sendBtn").addEventListener("click", sendMessage);
 $("input").addEventListener("input", autosize);
 $("input").addEventListener("keydown", (e) => {
@@ -791,7 +850,8 @@ $("closeDlg").addEventListener("click", () => $("statusDlg").close());
 // ---- start: live-refresh so messages from Claude appear on their own
 (async () => {
   await loadProjects();
-  await Promise.all([loadHistory(true), loadModels()]);
+  if (store.get("planMode") === "1") { $("planMode").checked = true; $("planMode").dispatchEvent(new Event("change")); }
+  await Promise.all([loadHistory(true), loadModels(), loadLaunchOptions()]);
   loadStatus();
   setInterval(() => loadHistory().catch(() => {}), 3000);
   setInterval(() => loadProjects().catch(() => {}), 10000);

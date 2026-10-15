@@ -18,6 +18,17 @@ Messages starting with [Claude] come from Claude; messages starting with [Human]
 Claude often hands you smaller, well-defined tasks (writing a function, summarising text, drafting tests, explaining code).
 Answer directly and concisely. When asked for code, return complete, working code in fenced blocks.`;
 
+// Plan mode: think the task through and return a plan instead of doing it, like Claude Code's plan mode.
+const PLAN_PROMPT = `
+
+You are in plan mode: don't write the implementation, and don't mention plan mode. Reply with a plan using these headings:
+1. **Goal**: one or two sentences on what done looks like.
+2. **Questions / assumptions**: anything unclear, and what you'll assume if nobody answers.
+3. **Steps**: a numbered list. For each step name the files, functions or commands involved and what changes.
+4. **Risks**: what could break or is easy to get wrong.
+5. **How to verify**: tests or checks that prove it works.
+Keep it concise. Short code snippets only where a signature or data shape needs pinning down.`;
+
 export function projectDir() {
   return path.resolve(process.env.OLLAMA_BRIDGE_PROJECT || process.cwd());
 }
@@ -75,9 +86,9 @@ export function listProjects() {
     .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 }
 
-export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true, dir = projectDir() }) {
+export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true, plan = false, dir = projectDir() }) {
   const log = loadLog(dir);
-  const entry = { from, content: prompt, ts: new Date().toISOString() };
+  const entry = { from, content: prompt, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) };
   const history = useHistory ? [...log.messages, entry] : [entry];
 
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
@@ -87,7 +98,7 @@ export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHis
       model,
       stream: false,
       options: { num_ctx: NUM_CTX },
-      messages: [{ role: "system", content: system || SYSTEM_PROMPT }, ...toOllamaMessages(history)],
+      messages: [{ role: "system", content: (system || SYSTEM_PROMPT) + (plan ? PLAN_PROMPT : "") }, ...toOllamaMessages(history)],
     }),
   });
   if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${await res.text()}`);
@@ -97,7 +108,7 @@ export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHis
 
   // Re-read before saving: Claude, local-chat and the web UI may all have written while the model was thinking.
   const fresh = loadLog(dir);
-  fresh.messages.push(entry, { from: "local", model, content: reply, ts: new Date().toISOString() });
+  fresh.messages.push(entry, { from: "local", model, content: reply, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) });
   saveLog(fresh, dir);
   return { reply, model };
 }

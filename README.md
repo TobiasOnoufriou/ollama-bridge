@@ -59,6 +59,8 @@ ollama-bridge remove             # remove this folder from the list (--delete-hi
 ollama-bridge open claude        # new terminal window running Claude Code in this folder
 ollama-bridge open local ~/code/my-app   # ...Claude Code on the local model, in another folder
 ollama-bridge open terminal      # ...or just a shell; `open folder` opens the file manager
+ollama-bridge open claude --model sonnet --plan   # pick the Claude model and start in plan mode
+ollama-bridge chat --plan        # terminal chat in plan mode (type /plan to toggle)
 ollama-bridge reset              # clear this folder's shared log
 ollama-bridge install            # re-run the installer
 ```
@@ -85,6 +87,21 @@ Each project has buttons to open, in that folder: **Claude** (Claude Code in a n
 (otherwise a PowerShell window), macOS uses Terminal.app, and Linux uses the first terminal it finds
 (`x-terminal-emulator`, GNOME Terminal, Konsole, xfce4-terminal, kitty, Alacritty or xterm). On Linux, **Browse…**
 needs `zenity` or `kdialog`; you can always type the path instead.
+
+Under the buttons, pick how they start (remembered in your browser):
+
+- **Claude model:** Default, Fable, Opus, Sonnet or Haiku (aliases, so always the latest version).
+- **Local model:** which Ollama model **Claude (local)** uses. Only models that make real tool calls are
+  selectable; the ones that don't (`qwen2.5-coder`, `deepseek-r1`) are shown greyed out.
+- **Start in:** Normal, **Plan mode** (Claude researches and proposes a plan before changing anything),
+  Auto-accept edits or Auto mode.
+
+### Plan mode for the local models
+
+Tick **Plan** next to Send (or use `ollama-bridge chat --plan` / `/plan`) and the model replies with a plan
+instead of doing the task: goal, questions and assumptions, numbered steps naming files and functions, risks,
+and how to verify. Plan messages get a **Plan** badge. Claude can ask for one too: `ask_local` takes
+`plan: true`, which pairs well with `deepseek-r1:14b` for a second opinion on an approach.
 
 ## Configuration
 
