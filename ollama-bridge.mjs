@@ -4,7 +4,7 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { spawnSync } from "node:child_process";
 import { HERE } from "./config.mjs";
-import { chat, loadLog, saveLog, logPath, projectDir } from "./lib.mjs";
+import { chat, loadLog, clearLog, logPath, projectDir, subId, defaultSub, listSessions, createSession, renameSession, deleteSession } from "./lib.mjs";
 import { allProjects, addProject, removeProject, resolveUserPath } from "./projects.mjs";
 import { launchIn, LAUNCH_TARGETS } from "./launch.mjs";
 import { routePrompt } from "./router.mjs";
@@ -18,7 +18,20 @@ const tty = process.stdout.isTTY;
 const c = (code) => (s) => (tty ? `\x1b[${code}m${s}\x1b[0m` : String(s));
 const bold = c(1), dim = c(2), green = c(32), yellow = c(33), red = c(31), cyan = c(36);
 
-const [cmd = "help", ...args] = process.argv.slice(2);
+// --sub <name> works with any command: it picks the project's sub-session, via the env var that lib.mjs and
+// child processes (chat.mjs, claude-local) read.
+const argv = process.argv.slice(2);
+const subAt = argv.indexOf("--sub");
+if (subAt !== -1) {
+  try {
+    process.env.OLLAMA_BRIDGE_SESSION = subId(argv[subAt + 1]);
+  } catch (err) {
+    console.error(red(err.message));
+    process.exit(1);
+  }
+  argv.splice(subAt, 2);
+}
+const [cmd = "help", ...args] = argv;
 const flag = (name) => args.includes(name);
 
 const HELP = `${bold("ollama-bridge")} - Claude Code + local Ollama models with a shared conversation
@@ -50,9 +63,15 @@ ${bold("Usage:")} ollama-bridge <command> [options]
                               and the same --model, --plan, --effort, --fast as open
   ${cyan("handoff")}                     Summarise this folder's latest Claude Code session with the local model,
                               for pasting into a new (cheaper) session. --session <id>, --model, --no-copy
+  ${cyan("sessions")}                    List this folder's sub-sessions (separate conversations, each with its own
+                              Claude session). ${cyan("sessions add")} <name>, ${cyan("sessions rename")} <id> <name>,
+                              ${cyan("sessions remove")} <id>
   ${cyan("reset")} [--yes]               Clear this folder's shared log
   ${cyan("install")} [--yes]             Run the installer (safe to re-run)
   ${cyan("help")}                        Show this help
+
+  --sub <id> before or after any command uses that sub-session instead of the main conversation
+  (ask, chat, history, reset, open). Same as setting OLLAMA_BRIDGE_SESSION.
 `;
 
 function run(file, fileArgs) {
@@ -145,8 +164,41 @@ switch (cmd) {
 
   case "history": {
     const msgs = loadLog().messages.slice(-(Number(args[0]) || 20));
-    if (!msgs.length) console.log(dim(`No shared history yet for ${projectDir()}.`));
+    if (!msgs.length) console.log(dim(`No shared history yet for ${projectDir()}${defaultSub() ? ` (session ${defaultSub()})` : ""}.`));
     else printMessages(msgs);
+    break;
+  }
+
+  case "sessions": {
+    // ollama-bridge sessions [add <name> | rename <id> <name> | remove <id>]
+    const [action = "list", id, ...rest] = args;
+    const dir = projectDir();
+    try {
+      if (action === "add") {
+        const name = [id, ...rest].join(" ");
+        const sub = createSession(dir, name);
+        console.log(green(`Created session ${sub}.`) + dim(` Use it with: ollama-bridge --sub ${sub} chat`));
+      } else if (action === "rename") {
+        renameSession(dir, id, rest.join(" "));
+        console.log(green(`Renamed ${id}.`));
+      } else if (action === "remove" || action === "delete") {
+        deleteSession(dir, id);
+        console.log(green(`Deleted session ${id}.`));
+      } else if (action === "list") {
+        const current = defaultSub();
+        for (const s of listSessions(dir)) {
+          const when = s.updated ? `last ${new Date(s.updated).toLocaleString()}` : "no messages yet";
+          const label = s.id ? `${s.id}${s.name !== s.id ? `  ${dim(s.name)}` : ""}` : "main";
+          console.log(`  ${s.id === current ? green("*") : " "} ${label}\n      ${dim(`${s.messages} messages, ${when}`)}`);
+        }
+      } else {
+        console.error(red("Usage: ollama-bridge sessions [add <name> | rename <id> <name> | remove <id>]"));
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(red(err.message));
+      process.exit(1);
+    }
     break;
   }
 
@@ -154,7 +206,7 @@ switch (cmd) {
     for (const p of allProjects()) {
       const when = p.updated ? `last ${new Date(p.updated).toLocaleString()}` : "no messages yet";
       const tags = [p.current && "here", !p.exists && red("missing")].filter(Boolean).join(", ");
-      console.log(`  ${p.project}${tags ? `  (${tags})` : ""}\n    ${dim(`${p.messages} messages, ${when}`)}`);
+      console.log(`  ${p.project}${tags ? `  (${tags})` : ""}\n    ${dim(`${p.messages} messages, ${when}${p.sessions ? `, ${p.sessions} sub-session${p.sessions === 1 ? "" : "s"}` : ""}`)}`);
     }
     break;
   }
@@ -186,7 +238,7 @@ switch (cmd) {
     }
     try {
       const dir = resolveUserPath(folder);
-      await launchIn(dir, what, { model: opt("--model"), mode: flag("--plan") ? "plan" : opt("--mode"), effort: opt("--effort"), fast: flag("--fast") });
+      await launchIn(dir, what, { model: opt("--model"), mode: flag("--plan") ? "plan" : opt("--mode"), effort: opt("--effort"), fast: flag("--fast"), sub: defaultSub() });
       console.log(green(`Opened ${LAUNCH_TARGETS[what]} in ${dir}`));
     } catch (err) {
       console.error(red(err.message));
@@ -233,7 +285,7 @@ ${repo}. Start a session on one with: ollama-bridge issue <number>`));
       const dir = resolveUserPath(folder);
       const what = flag("--local") ? "local" : "claude";
       const out = await issueSession(dir, number.replace("#", ""), { branch: !flag("--no-branch") });
-      await launchIn(dir, what, { model: opt("--model"), mode: flag("--plan") ? "plan" : opt("--mode"), effort: opt("--effort"), fast: flag("--fast"), session: out.session });
+      await launchIn(dir, what, { model: opt("--model"), mode: flag("--plan") ? "plan" : opt("--mode"), effort: opt("--effort"), fast: flag("--fast"), session: out.session, sub: defaultSub() });
       console.log(green(`Opened ${LAUNCH_TARGETS[what]} on ${out.repo}#${out.issue.number}: ${out.issue.title}`));
       console.log(dim(`Issue text: ${out.file}${out.branch ? `
 It will work on branch ${out.branch}` : ""}`));
@@ -275,7 +327,7 @@ It will work on branch ${out.branch}` : ""}`));
       rl.close();
       if (!a.startsWith("y")) break;
     }
-    saveLog({ project: projectDir(), messages: [] });
+    clearLog();
     console.log(green(`Cleared ${logPath()}`));
     break;
   }

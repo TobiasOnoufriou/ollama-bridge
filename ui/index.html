@@ -125,6 +125,19 @@
   select { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; max-width: 260px; }
   label.toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
 
+  /* Sub-session tabs */
+  #subTabs { display: flex; gap: 2px; align-items: flex-end; flex-wrap: wrap; padding: 6px 20px 0; background: var(--panel); border-bottom: 1px solid var(--border); }
+  .subtab { display: inline-flex; align-items: center; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; margin-bottom: -1px; color: var(--muted); }
+  .subtab:hover { color: var(--text); }
+  .subtab.on { background: var(--bg); border-color: var(--border); color: var(--text); font-weight: 600; }
+  .subtab button { all: unset; cursor: pointer; font-size: 13px; padding: 5px 10px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .subtab button.x { padding: 5px 8px 5px 0; opacity: 0; font-weight: 400; }
+  .subtab:hover button.x, .subtab button.x:focus-visible { opacity: .7; }
+  .subtab button.x:hover { color: var(--bad); opacity: 1; }
+  .subtab button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
+  .subtab.add { color: var(--accent); }
+  @media (hover: none) { .subtab button.x { opacity: .7; } }
+
   #messages { flex: 1; overflow-y: auto; padding: 20px; }
   #sessionHints:empty { display: none; }
   #sessionHints { padding: 10px 20px 0; }
@@ -436,13 +449,14 @@
         <span class="sep"></span>
         <button id="settingsBtn" title="Choose models, effort, fast mode and how Claude starts">
           <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h9M14 12h0"/><circle cx="10.5" cy="4" r="1.5"/><circle cx="5.5" cy="8" r="1.5"/><circle cx="12.5" cy="12" r="1.5"/></svg>Settings</button>
-        <button class="ghost" id="clearBtn" title="Clear this project's shared conversation">Clear</button>
+        <button class="ghost" id="clearBtn" title="Clear this session's shared conversation">Clear</button>
         <button class="ghost danger-text" id="removeBtn" title="Delete this project from the list">Delete</button>
       </div>
       <button class="summary" id="summary" title="Change settings"></button>
     </div>
   </header>
 
+  <div id="subTabs" role="tablist" aria-label="Sessions in this project"></div>
   <div id="sessionHints"></div>
   <div id="messages"><div class="inner" id="list"></div></div>
 
@@ -525,6 +539,7 @@
       <tr><td><kbd>Alt</kbd>+<kbd>N</kbd></td><td>add a project</td></tr>
       <tr><td><kbd>Alt</kbd>+<kbd>I</kbd></td><td>GitHub issues: start a Claude session on one</td></tr>
       <tr><td><kbd>?</kbd></td><td>this list</td></tr>
+      <tr><td>Double-click a session tab</td><td>rename it; <b>+ New</b> starts a separate conversation (with its own Claude session) in the same project</td></tr>
     </table>
   </div>
 </dialog>
@@ -606,7 +621,8 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { projects: [], project: null, config: null, messages: [], sending: false, lastCount: -1 };
+// sub: the project's current sub-session ("" = main); subs: its sessions from /api/sessions.
+const state = { projects: [], project: null, sub: "", subs: [], config: null, messages: [], sending: false, lastCount: -1 };
 
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -675,7 +691,7 @@ function renderProjects() {
     <div class="project-row">
       <button class="project ${p.project === state.project ? "active" : ""}" data-i="${i}" title="${esc(p.project)}">
         <div class="name">${esc(basename(p.project))}${p.current ? '<span class="tag">here</span>' : ""}${p.exists ? "" : '<span class="tag missing">missing</span>'}</div>
-        <div class="meta">${p.messages} message${p.messages === 1 ? "" : "s"} · ${relTime(p.updated)}</div>
+        <div class="meta">${p.messages} message${p.messages === 1 ? "" : "s"} · ${relTime(p.updated)}${p.sessions ? ` · ${p.sessions + 1} sessions` : ""}</div>
       </button>
       <button class="row-del" data-del="${i}" title="Delete ${esc(basename(p.project))}" aria-label="Delete ${esc(basename(p.project))}">${TRASH}</button>
     </div>`).join("");
@@ -762,7 +778,7 @@ async function launch(what) {
   try {
     const o = claudeOpts();
     const body = what === "claude" ? o : what === "local" ? { model: $("localModel").value, mode: o.mode } : {};
-    await api("/api/launch", { project: state.project, what, ...body });
+    await api("/api/launch", { project: state.project, sub: state.sub, what, ...body });
     const name = (id) => $(id).selectedOptions[0].textContent.replace(/ · .*/, "").replace(/ \(.*/, "");
     const detail = what === "claude"
       ? [o.model && name("claudeModel"), o.effort && `${name("effort").toLowerCase()} effort`, o.fast && "fast", o.mode && name("startMode")]
@@ -836,7 +852,7 @@ async function startIssue(what) {
   try {
     const o = claudeOpts();
     const body = what === "claude" ? o : { model: $("localModel").value, mode: o.mode };
-    const out = await api("/api/issues/start", { project: state.project, number: i.number, what, branch: $("issueBranch").checked, ...body });
+    const out = await api("/api/issues/start", { project: state.project, sub: state.sub, number: i.number, what, branch: $("issueBranch").checked, ...body });
     $("issuesDlg").close();
     toast(`Opened ${LAUNCH_LABEL[what]} on #${out.number}${out.branch ? ` (branch ${out.branch})` : ""}`);
   } catch (e) { toast(e.message, true); }
@@ -868,11 +884,12 @@ function openDelete(p) {
   $("delName").textContent = basename(p.project);
   $("delPath").textContent = p.project;
   const box = $("delHistory");
-  box.checked = p.messages > 0;
-  box.disabled = p.messages === 0;
-  $("delHistoryLabel").textContent = p.messages
-    ? `Also delete its shared conversation (${p.messages} message${p.messages === 1 ? "" : "s"})`
-    : "It has no shared conversation to delete";
+  const has = p.messages > 0 || p.sessions > 0;
+  box.checked = has;
+  box.disabled = !has;
+  $("delHistoryLabel").textContent = !has ? "It has no shared conversation to delete"
+    : p.sessions ? `Also delete its shared conversations (main and ${p.sessions} sub-session${p.sessions === 1 ? "" : "s"})`
+    : `Also delete its shared conversation (${p.messages} message${p.messages === 1 ? "" : "s"})`;
   $("delDlg").showModal();
   $("delConfirm").focus();
 }
@@ -890,6 +907,7 @@ async function confirmDelete() {
       store.set("project", "");
     }
     await loadProjects();
+    await loadSessions();
     state.lastCount = -1;
     loadHistory(true);
     toast(`Deleted ${basename(p.project)}${deleteHistory ? " and its conversation" : ""}`);
@@ -963,6 +981,7 @@ async function addPath(value) {
     state.project = project;
     store.set("project", project);
     await loadProjects();
+    await loadSessions();
     state.lastCount = -1;
     loadHistory(true);
     toast(`Added ${basename(project)}`);
@@ -1009,9 +1028,83 @@ async function loadProjects() {
   renderHeader();
 }
 
+// ---- sub-sessions: several conversations per project, each with its own log and its own Claude session
+const subStoreKey = () => `sub:${state.project}`;
+const subName = () => state.subs.find((s) => s.id === state.sub)?.name || "Main";
+let subsFor = null, subsHtml = "";
+async function loadSessions() {
+  const project = state.project;
+  if (!project) { state.subs = []; state.sub = ""; renderSubTabs(); return; }
+  const subs = await api(`/api/sessions?project=${encodeURIComponent(project)}`);
+  if (project !== state.project) return;
+  state.subs = subs;
+  // Each project remembers the session you last had open.
+  if (subsFor !== project) { subsFor = project; state.sub = store.get(subStoreKey()) || ""; state.lastCount = -1; }
+  if (!subs.some((s) => s.id === state.sub)) { state.sub = ""; state.lastCount = -1; }
+  renderSubTabs();
+}
+
+function renderSubTabs() {
+  $("subTabs").hidden = !state.project;
+  const about = (s) => `${s.name}: ${s.messages ? `${s.messages} message${s.messages === 1 ? "" : "s"}, ${relTime(s.updated)}` : "no messages yet"}${s.id ? " · double-click to rename" : ""}`;
+  const html = state.subs.map((s) => `<div class="subtab ${s.id === state.sub ? "on" : ""}">
+      <button role="tab" aria-selected="${s.id === state.sub}" data-sub="${esc(s.id)}" title="${esc(about(s))}">${esc(s.name)}</button>
+      ${s.id ? `<button class="x" data-subdel="${esc(s.id)}" title="Delete ${esc(s.name)}" aria-label="Delete ${esc(s.name)}">✕</button>` : ""}</div>`).join("") +
+    `<div class="subtab add"><button id="newSubBtn" title="New session: a separate conversation in this project, with its own Claude session">+ New</button></div>`;
+  // Only touch the DOM when something changed, so the 10 s refresh doesn't eat clicks.
+  if (html !== subsHtml) $("subTabs").innerHTML = subsHtml = html;
+}
+
+function selectSub(id) {
+  if (id === state.sub) return;
+  if (state.sending) return toast("Wait for the current reply first", true);
+  state.sub = id;
+  store.set(subStoreKey(), id);
+  state.lastCount = -1;
+  renderSubTabs();
+  loadHistory(true);
+}
+
+async function newSub() {
+  if (!state.project) return;
+  const name = prompt("Name for the new session (e.g. auth, docs):");
+  if (!name?.trim()) return;
+  try {
+    const { sub } = await api("/api/sessions/new", { project: state.project, name });
+    await loadSessions();
+    selectSub(sub);
+    loadProjects();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function renameSub(id) {
+  const s = state.subs.find((x) => x.id === id);
+  if (!s || !id) return;
+  const name = prompt("Rename the session:", s.name);
+  if (!name?.trim() || name.trim() === s.name) return;
+  try {
+    await api("/api/sessions/rename", { project: state.project, sub: id, name });
+    await loadSessions();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deleteSub(id) {
+  const s = state.subs.find((x) => x.id === id);
+  if (!s || !id) return;
+  if (state.sending && id === state.sub) return toast("Wait for the current reply first", true);
+  if (!confirm(`Delete the session "${s.name}" and its conversation${s.messages ? ` (${s.messages} message${s.messages === 1 ? "" : "s"})` : ""}?`)) return;
+  try {
+    await api("/api/sessions/delete", { project: state.project, sub: id });
+    if (state.sub === id) selectSub("");
+    await loadSessions();
+    loadProjects();
+    toast(`Deleted ${s.name}`);
+  } catch (e) { toast(e.message, true); }
+}
+
 // Long Claude sessions cost more per message (each one re-reads the whole context): suggest a fresh one.
 // Dismissing hides a hint until the session grows another 50k tokens.
-const hintKey = (h) => `${state.project}|${h.kind}|${h.session || ""}|${Math.floor(h.tokens / 50000)}`;
+const hintKey = (h) => `${state.project}|${state.sub}|${h.kind}|${h.session || ""}|${Math.floor(h.tokens / 50000)}`;
 const dismissedHints = new Set();
 function renderSessionHints(hints) {
   const k = (n) => `${Math.round(n / 1000)}k`;
@@ -1042,13 +1135,13 @@ $("sessionHints").addEventListener("click", async (e) => {
   b.disabled = true;
   try {
     if (b.dataset.hint === "fresh") {
-      await api("/api/claude/fresh", { project: state.project });
+      await api("/api/claude/fresh", { project: state.project, sub: state.sub });
       dismissedHints.add(box.dataset.key);
       box.remove();
       toast("The next Claude message starts a new session");
     } else {
       b.textContent = "Summarising…";
-      const out = await api("/api/handoff", { project: state.project, session: b.dataset.session, model: $("model").value || undefined });
+      const out = await api("/api/handoff", { project: state.project, sub: state.sub, session: b.dataset.session, model: $("model").value || undefined });
       toast(out.copied ? "Hand-off note copied: paste it as the first message of a new session" : "Hand-off note added to the conversation");
       state.lastCount = -1;
       await loadHistory(true);
@@ -1062,7 +1155,9 @@ $("sessionHints").addEventListener("click", async (e) => {
 
 async function loadHistory(scroll = false) {
   if (!state.project || state.sending) return;
-  const log = await api(`/api/history?project=${encodeURIComponent(state.project)}`);
+  const { project, sub } = state;
+  const log = await api(`/api/history?${new URLSearchParams({ project, sub })}`);
+  if (project !== state.project || sub !== state.sub || state.sending) return; // switched while loading
   renderSessionHints(log.sessionHints || []);
   if (log.messages.length === state.lastCount && !scroll) return;
   state.lastCount = log.messages.length;
@@ -1212,6 +1307,7 @@ async function sendMessage(override = {}) {
   const localModel = override.model || p.model || $("model").value;
   const plan = override.plan ?? (p.plan || $("planMode").checked);
   const useHistory = $("useHistory").checked;
+  const sub = state.sub;
   state.sending = true;
   state.lastSent = raw;
   $("sendBtn").disabled = true;
@@ -1263,14 +1359,14 @@ async function sendMessage(override = {}) {
     }
     if (route.to === "claude") {
       const out = await api("/api/claude", {
-        project: state.project, prompt: text, ...claudeOpts(),
+        project: state.project, sub, prompt: text, ...claudeOpts(),
         ...(override.mode ? { mode: override.mode } : {}), ...(override.effort ? { effort: override.effort } : {}),
         autoEffort: target === "smart" ? route.effort : "", plan, useHistory, route,
         logText: override.logText || "", exclude: override.exclude || [],
       });
       if (out.isError) toast("Claude Code reported an error; see its reply", true);
     } else {
-      await api("/api/chat", { project: state.project, prompt: text, model: localModel, useHistory, plan, projectContext: readProject, stepwise, progressId, route: target === "smart" || typed || override.reason ? route : null });
+      await api("/api/chat", { project: state.project, sub, prompt: text, model: localModel, useHistory, plan, projectContext: readProject, stepwise, progressId, route: target === "smart" || typed || override.reason ? route : null });
     }
   } catch (e) {
     pending.content = `Error: ${e.message}`;
@@ -1404,7 +1500,7 @@ async function runImplement(m) {
   try {
     const o = claudeOpts();
     const out = await api("/api/implement", {
-      project: state.project, planTs: m.ts, progressId, model: o.model, effort: o.effort || "medium", fast: o.fast,
+      project: state.project, sub: state.sub, planTs: m.ts, progressId, model: o.model, effort: o.effort || "medium", fast: o.fast,
       reviewMode: $("reviewMode").value,
     });
     if (out.isError) toast("Claude Code reported an error; see its reply", true);
@@ -1428,8 +1524,9 @@ async function runImplement(m) {
 function openUsage() { $("usageDlg").showModal(); loadUsage(); }
 
 async function clearHistory() {
-  if (!state.project || !confirm(`Clear the shared conversation for ${basename(state.project)}?\nClaude and the local models will forget it too.`)) return;
-  await api("/api/reset", { project: state.project });
+  const where = `${basename(state.project || "")}${state.sub ? ` (${subName()})` : ""}`;
+  if (!state.project || !confirm(`Clear the shared conversation for ${where}?\nClaude and the local models will forget it too.`)) return;
+  await api("/api/reset", { project: state.project, sub: state.sub });
   state.lastCount = -1;
   await loadHistory(true);
   loadProjects();
@@ -1442,7 +1539,7 @@ function autosize() {
 }
 
 // ---- events
-$("projects").addEventListener("click", (e) => {
+$("projects").addEventListener("click", async (e) => {
   const del = e.target.closest(".row-del");
   if (del) return openDelete(state.projects[del.dataset.del]);
   const btn = e.target.closest(".project");
@@ -1452,7 +1549,19 @@ $("projects").addEventListener("click", (e) => {
   state.lastCount = -1;
   renderProjects();
   renderHeader();
+  try { await loadSessions(); } catch (err) { toast(err.message, true); }
   loadHistory(true);
+});
+$("subTabs").addEventListener("click", (e) => {
+  const del = e.target.closest("[data-subdel]");
+  if (del) return deleteSub(del.dataset.subdel);
+  if (e.target.closest("#newSubBtn")) return newSub();
+  const b = e.target.closest("[data-sub]");
+  if (b) selectSub(b.dataset.sub);
+});
+$("subTabs").addEventListener("dblclick", (e) => {
+  const b = e.target.closest("[data-sub]");
+  if (b?.dataset.sub) renameSub(b.dataset.sub);
 });
 $("list").addEventListener("click", async (e) => {
   // Hover actions on a message: copy it, retry the prompt on the other side, or get a second opinion.
@@ -1624,12 +1733,13 @@ $("closeDlg").addEventListener("click", () => $("statusDlg").close());
   if (["steps", "quick"].includes(store.get("planStyle"))) $("planStyle").value = store.get("planStyle");
   if (["fix", "review", "off"].includes(store.get("reviewMode"))) $("reviewMode").value = store.get("reviewMode");
   setTarget(["local", "smart", "claude"].includes(store.get("target")) ? store.get("target") : "smart");
+  await loadSessions().catch(() => {});
   await Promise.all([loadHistory(true), loadModels(), loadLaunchOptions()]);
   loadStatus();
   loadUsage().catch(() => {});
   setInterval(() => { if (!$("usageDlg").open) loadUsage().catch(() => {}); }, 60000);
   setInterval(() => loadHistory().catch(() => {}), 3000);
-  setInterval(() => loadProjects().catch(() => {}), 10000);
+  setInterval(() => loadProjects().then(loadSessions).catch(() => {}), 10000);
   $("input").focus();
 })();
 </script>

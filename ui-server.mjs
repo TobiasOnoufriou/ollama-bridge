@@ -4,7 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { HERE } from "./config.mjs";
-import { chat, loadLog, saveLog } from "./lib.mjs";
+import { chat, loadLog, saveLog, clearLog, subId, listSessions, createSession, renameSession, deleteSession } from "./lib.mjs";
 import { checkStatus, modelsWithRoles, effectiveConfig } from "./status.mjs";
 import { allProjects, addProject, removeProject, isKnownProject, claudeCodeProjects, completeDir } from "./projects.mjs";
 import { pickFolder, launchIn, CLAUDE_MODELS, START_MODES, EFFORT_LEVELS } from "./launch.mjs";
@@ -30,14 +30,15 @@ function routeMeta(route) {
 // Claude sessions in this project whose context has grown past the hint threshold, so the page can suggest a new one:
 //  - "chat": the session the chat resumes for Claude runs (one per toolset).
 //  - "terminal": the latest Claude Code session in the folder (desktop app or terminal), if active in the last day.
-function sessionHints(dir) {
+function sessionHints(dir, sub) {
   const hints = [];
-  const log = loadLog(dir);
+  const log = loadLog(dir, sub);
   for (const saved of Object.values(log.claude || {})) {
     const size = contextSize(transcriptFor(saved.session, dir));
     if (shouldHint(size)) hints.push({ kind: "chat", tokens: size.tokens, baseline: size.baseline, ...savings(size) });
   }
-  const chatSessions = new Set(Object.values(log.claude || {}).map((s) => s.session));
+  // Claude sessions resumed by any of the project's chats (main or sub-sessions) aren't "terminal" sessions.
+  const chatSessions = new Set(listSessions(dir).flatMap((s) => Object.values(loadLog(dir, s.id).claude || {}).map((c) => c.session)));
   const latest = recentTranscripts(dir).find((f) => !chatSessions.has(path.basename(f, ".jsonl")));
   const size = latest && contextSize(latest);
   if (shouldHint(size) && Date.now() - Date.parse(size.ts) < 86400e3) {
@@ -77,6 +78,12 @@ function projectParam(value) {
   return path.resolve(value);
 }
 
+// Sub-session id ("" = main); subId() only accepts [a-z0-9-], so it can't reach outside logs/sessions/.
+function subParam(value) {
+  if (value != null && typeof value !== "string") throw new Error("sub must be a string");
+  return subId(value);
+}
+
 async function route(req, res, url) {
   const { pathname } = url;
   if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
@@ -98,7 +105,11 @@ async function route(req, res, url) {
   }
   if (req.method === "GET" && pathname === "/api/history") {
     const dir = projectParam(url.searchParams.get("project"));
-    return send(res, 200, { ...loadLog(dir), sessionHints: sessionHints(dir) });
+    const sub = subParam(url.searchParams.get("sub"));
+    return send(res, 200, { ...loadLog(dir, sub), sessionHints: sessionHints(dir, sub) });
+  }
+  if (req.method === "GET" && pathname === "/api/sessions") {
+    return send(res, 200, listSessions(projectParam(url.searchParams.get("project"))));
   }
   // GitHub issues of the project's repo, for starting a session on one.
   if (req.method === "GET" && pathname === "/api/issues") {
@@ -124,12 +135,14 @@ async function route(req, res, url) {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
       const started = Date.now();
       const dir = projectParam(body.project);
+      const sub = subParam(body.sub);
       // Step-by-step plans: many small questions plus checks (planner.mjs), with progress the page can poll.
       if (body.plan === true && body.stepwise === true) {
         const id = String(body.progressId || "").slice(0, 64);
         try {
           const out = await planAndLog({
             dir,
+            sub,
             prompt: body.prompt,
             model: body.model || undefined,
             useHistory: body.useHistory !== false,
@@ -157,19 +170,22 @@ async function route(req, res, url) {
         meta: routeMeta(body.route),
         context,
         dir,
+        sub,
       });
       return send(res, 200, { ...out, ms: Date.now() - started });
     }
     // Implement a local plan with Claude, then review (and fix once) per Settings; progress via /api/progress.
     if (pathname === "/api/implement") {
       const dir = projectParam(body.project);
-      const planMessage = loadLog(dir).messages.find((m) => m.ts === body.planTs && m.from === "local");
-      if (!planMessage) return send(res, 404, { error: "Plan not found in this project's conversation" });
+      const sub = subParam(body.sub);
+      const planMessage = loadLog(dir, sub).messages.find((m) => m.ts === body.planTs && m.from === "local");
+      if (!planMessage) return send(res, 404, { error: "Plan not found in this conversation" });
       const id = String(body.progressId || "").slice(0, 64);
       const reviewMode = ["fix", "review", "off"].includes(body.reviewMode) ? body.reviewMode : "fix";
       try {
         const out = await implementAndReview({
           dir,
+          sub,
           planMessage,
           opts: { model: body.model || "", effort: body.effort || "", fast: body.fast === true },
           reviewMode,
@@ -194,6 +210,7 @@ async function route(req, res, url) {
       if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
       const out = await runClaude({
         dir: projectParam(body.project),
+        sub: subParam(body.sub),
         prompt: body.prompt,
         model: body.model || "",
         // The Plan box is the chat's only plan switch: a "Starts in: Plan mode" setting (meant for new terminal
@@ -213,12 +230,24 @@ async function route(req, res, url) {
     if (pathname === "/api/projects/remove") {
       return send(res, 200, { project: removeProject(projectParam(body.project), { deleteHistory: !!body.deleteHistory }) });
     }
+    // Sub-sessions: separate conversations (each with its own Claude session) in one project.
+    if (pathname === "/api/sessions/new") {
+      return send(res, 200, { sub: createSession(projectParam(body.project), body.name) });
+    }
+    if (pathname === "/api/sessions/rename") {
+      renameSession(projectParam(body.project), subParam(body.sub), body.name);
+      return send(res, 200, { ok: true });
+    }
+    if (pathname === "/api/sessions/delete") {
+      deleteSession(projectParam(body.project), subParam(body.sub));
+      return send(res, 200, { ok: true });
+    }
     if (pathname === "/api/pick-folder") return send(res, 200, { path: await pickFolder() });
     if (pathname === "/api/launch") {
       const dir = projectParam(body.project);
       // Only open terminals in folders that are on the project list.
       if (!isKnownProject(dir, startDir)) return send(res, 400, { error: "Add the folder as a project first" });
-      await launchIn(dir, body.what, { model: body.model || "", mode: body.mode || "", effort: body.effort || "", fast: body.fast === true });
+      await launchIn(dir, body.what, { model: body.model || "", mode: body.mode || "", effort: body.effort || "", fast: body.fast === true, sub: subParam(body.sub) });
       return send(res, 200, { ok: true });
     }
     // New Claude Code session (Claude, or Claude on the local model) in a terminal, briefed on a GitHub issue.
@@ -227,26 +256,26 @@ async function route(req, res, url) {
       if (!isKnownProject(dir, startDir)) return send(res, 400, { error: "Add the folder as a project first" });
       if (!["claude", "local"].includes(body.what)) return send(res, 400, { error: "Start Claude or Claude (local)" });
       const out = await issueSession(dir, body.number, { branch: body.branch !== false });
-      await launchIn(dir, body.what, { model: body.model || "", mode: body.mode || "", effort: body.effort || "", fast: body.fast === true, session: out.session });
+      await launchIn(dir, body.what, { model: body.model || "", mode: body.mode || "", effort: body.effort || "", fast: body.fast === true, session: out.session, sub: subParam(body.sub) });
       return send(res, 200, { repo: out.repo, number: out.issue.number, title: out.issue.title, branch: out.branch });
     }
     // Forget the chat's Claude sessions: the next Claude run starts fresh, with recent shared messages as background.
     if (pathname === "/api/claude/fresh") {
       const dir = projectParam(body.project);
-      const log = loadLog(dir);
+      const sub = subParam(body.sub);
+      const log = loadLog(dir, sub);
       delete log.claude;
-      saveLog(log, dir);
+      saveLog(log, dir, sub);
       return send(res, 200, { ok: true });
     }
     if (pathname === "/api/handoff") {
       const dir = projectParam(body.project);
-      const out = await handoff({ dir, session: String(body.session || ""), model: body.model || undefined });
+      const out = await handoff({ dir, session: String(body.session || ""), sub: subParam(body.sub), model: body.model || undefined });
       // Copied here rather than in the page: the summary takes longer than a browser allows a clipboard write after a click.
       return send(res, 200, { note: out.note, model: out.model, copied: copyToClipboard(out.note) });
     }
     if (pathname === "/api/reset") {
-      const dir = projectParam(body.project);
-      saveLog({ project: dir, messages: [] }, dir);
+      clearLog(projectParam(body.project), subParam(body.sub));
       return send(res, 200, { ok: true });
     }
   }

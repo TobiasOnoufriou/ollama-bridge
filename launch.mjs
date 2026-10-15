@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { HERE } from "./config.mjs";
+import { subId } from "./lib.mjs";
 
 const IS_WIN = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
@@ -111,20 +112,25 @@ function shellJoin(args) {
 }
 
 // Shell command to run in the new terminal for each target (null = just a shell).
+// opts.sub: a bridge sub-session; it's set as OLLAMA_BRIDGE_SESSION so ask_local from that Claude writes to it.
 export function commandFor(what, opts) {
-  if (what === "claude") return `claude ${shellJoin(claudeArgs(opts))}`.trim();
+  let cmd = null;
+  if (what === "claude") cmd = `claude ${shellJoin(claudeArgs(opts))}`.trim();
   if (what === "local") {
     const bridge = IS_WIN ? `& '${path.join(HERE, "ollama-bridge.cmd").replace(/'/g, "''")}'` : shQuote(path.join(HERE, "ollama-bridge"));
-    return `${bridge} claude ${shellJoin(claudeArgs(opts, { local: true }))}`.trim();
+    cmd = `${bridge} claude ${shellJoin(claudeArgs(opts, { local: true }))}`.trim();
   }
-  return null;
+  const sub = subId(opts?.sub); // validated to [a-z0-9-], so safe in a command line
+  if (cmd && sub) cmd = IS_WIN ? `$env:OLLAMA_BRIDGE_SESSION='${sub}'; ${cmd}` : `OLLAMA_BRIDGE_SESSION=${sub} ${cmd}`;
+  return cmd;
 }
 
-// opts: { model, mode, effort, fast, session } for the claude and local targets; model is a Claude alias/id or an Ollama model name.
+// opts: { model, mode, effort, fast, session, sub } for the claude and local targets; model is a Claude alias/id or an Ollama model name.
 export async function launchIn(dir, what, opts = {}) {
   if (!(what in LAUNCH_TARGETS)) throw new Error(`Unknown launch target: ${what}`);
   if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`Folder not found: ${dir}`);
-  const name = path.basename(dir) || dir;
+  const sub = subId(opts.sub);
+  const name = `${path.basename(dir) || dir}${sub ? ` [${sub}]` : ""}`;
 
   if (what === "folder") {
     if (IS_WIN) return detached("explorer", [dir]);
@@ -135,7 +141,8 @@ export async function launchIn(dir, what, opts = {}) {
   if (IS_WIN) {
     const ps = ["powershell", "-NoExit", ...(cmd ? ["-Command", cmd] : [])];
     // Windows Terminal if installed (new tab titled after the project), otherwise a classic console window.
-    if (hasCmd("wt")) return detached("wt", ["-w", "new", "-d", dir, "--title", `${name} - ${LAUNCH_TARGETS[what]}`, ...ps]);
+    // wt splits its command line on ";" (new tab), so a ";" meant for PowerShell has to be written "\;".
+    if (hasCmd("wt")) return detached("wt", ["-w", "new", "-d", dir, "--title", `${name} - ${LAUNCH_TARGETS[what]}`, ...ps.map((a) => a.replace(/;/g, "\\;"))]);
     return detached(ps[0], ps.slice(1), { cwd: dir });
   }
 

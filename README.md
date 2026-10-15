@@ -70,6 +70,8 @@ ollama-bridge issues             # GitHub issues of this folder's repo
 ollama-bridge issue 12           # new Claude Code window working on issue #12 (--local, --no-branch, --plan, ...)
 ollama-bridge handoff            # free hand-off note (local model) for starting a new, cheaper Claude session
 ollama-bridge reset              # clear this folder's shared log
+ollama-bridge sessions           # this folder's sub-sessions (sessions add <name>, rename <id> <name>, remove <id>)
+ollama-bridge --sub auth chat    # --sub <id> with any command: use that sub-session instead of the main log
 ollama-bridge install            # re-run the installer
 ```
 
@@ -96,6 +98,23 @@ Each project has buttons to open, in that folder: **Claude** (Claude Code in a n
 (otherwise a PowerShell window), macOS uses Terminal.app, and Linux uses the first terminal it finds
 (`x-terminal-emulator`, GNOME Terminal, Konsole, xfce4-terminal, kitty, Alacritty or xterm). On Linux, **Browse…**
 needs `zenity` or `kdialog`; you can always type the path instead.
+
+### Sub-sessions: several conversations in one project
+
+A project starts with one conversation, **Main**. The tabs under the project header hold more: **+ New** starts
+a separate conversation in the same folder (say "auth" and "docs"), with its own shared log and its own resumed
+Claude session, so unrelated work doesn't share history or Claude context. Double-click a tab to rename it, and
+use its ✕ to delete it. The page remembers which session you last had open in each project, and **Clear**
+empties just the open one.
+
+The **Claude**, **Claude (local)** and **Start in Claude** buttons open their terminal tied to the open session
+(they set `OLLAMA_BRIDGE_SESSION`), so `ask_local` and `local_history` from that Claude Code use the same
+conversation. A Claude Code started any other way uses Main.
+
+Main stays in `logs/<project>.json` as before; sub-sessions live in `logs/sessions/<project>/<id>.json`, where
+the id is a slug of the name (`a-z`, `0-9`, `-`). Deleting a project with its history deletes its sub-sessions
+too. On the command line, `ollama-bridge sessions` lists, adds, renames and removes them, and `--sub <id>`
+before or after any command (`ask`, `chat`, `history`, `reset`, `open`, `issue`, `handoff`) works in that one.
 
 ### Start a session from a GitHub issue
 
@@ -361,6 +380,7 @@ Environment variables override the config:
 | `OLLAMA_BRIDGE_REASONING_MODEL` | `reasoningModel` |
 | `OLLAMA_BRIDGE_NUM_CTX` | `bridgeNumCtx` |
 | `OLLAMA_BRIDGE_MAX_CHARS` | history sent per request (default `80000`) |
+| `OLLAMA_BRIDGE_SESSION` | sub-session to use instead of the project's main conversation (set by `--sub` and by terminals opened from a session tab) |
 | `OLLAMA_HOST_URL` | `ollamaUrl` |
 | `CLAUDE_LOCAL_MODEL` | the model claude-local runs (default `qwen3.6-cc`) |
 | `CLAUDE_LOCAL_CTX` | `claudeLocalCtx` |
