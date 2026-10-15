@@ -10,8 +10,9 @@ const CONTEXT_CHARS = 12000;
 const TIMEOUT_MS = 15 * 60 * 1000;
 // Runs from the chat have nobody to approve anything, so Claude only gets the tools it can actually use, and no
 // MCP servers or skills: tool descriptions are most of a session's input and are re-read on every turn.
-//  - Normal / Plan mode: read only.
-//  - Auto-accept edits: read and edit (shell commands would be refused anyway).
+//  - Plan mode: read only.
+//  - Normal / Auto-accept edits: read and edit (shell commands would be refused anyway). Normal can't ask before
+//    edits here, and read-only Normal left you unable to implement after unticking Plan, so it runs as acceptEdits.
 //  - Auto mode: the full toolset, since it can approve its own actions.
 const LEAN = ["--strict-mcp-config", "--disable-slash-commands"];
 const PROFILES = {
@@ -83,9 +84,10 @@ function spawnClaude(args, opts) {
 // autoEffort: Smart's suggestion ("low" or "medium"), used only when no effort is set.
 // Returns { reply, model, ms, costUsd, usage, isError }.
 // logText: what the log shows for the prompt (e.g. a short label instead of a pasted plan).
-export async function runClaude({ dir, prompt, model = "", mode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [] }) {
+export async function runClaude({ dir, prompt, model = "", mode: startMode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [] }) {
   const usedEffort = effort || (AUTO_EFFORTS.has(autoEffort) ? autoEffort : "");
-  const profile = mode === "" || mode === "plan" ? "read" : mode === "acceptEdits" ? "edit" : "full";
+  const mode = startMode || "acceptEdits";
+  const profile = mode === "plan" ? "read" : mode === "acceptEdits" ? "edit" : "full";
   // claudeArgs validates model, mode and effort.
   const base = ["-p", "--output-format", "json", ...claudeArgs({ model, mode, effort: usedEffort, fast }), ...PROFILES[profile]];
 
