@@ -10,6 +10,7 @@ import { launchIn, LAUNCH_TARGETS } from "./launch.mjs";
 import { routePrompt } from "./router.mjs";
 import { runClaude } from "./claude-run.mjs";
 import { projectContext } from "./context.mjs";
+import { planAndLog } from "./planner.mjs";
 import { checkStatus, modelsWithRoles, effectiveConfig } from "./status.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -83,6 +84,11 @@ switch (cmd) {
     console.log(dim(`-> ${route.to === "local" ? "local model" : "Claude Code"}: ${route.reason}${plan ? " (plan mode)" : ""}\n`));
     try {
       if (route.to === "local") {
+        if (plan && !flag("--quick")) {
+          const out = await planAndLog({ prompt, model: modelArg || undefined, meta: { route }, onProgress: (t) => console.log(dim(`  … ${t}`)) });
+          console.log(`${bold(yellow(out.model))}\n${out.reply}`);
+          break;
+        }
         const context = plan ? await projectContext(projectDir(), prompt, { model: modelArg || undefined }).catch(() => null) : null;
         if (context?.sources.length) console.log(dim(`(read ${context.sources.length} parts of the project)`));
         const { reply, model } = await chat({ from: "human", prompt, model: modelArg || undefined, plan, meta: { route }, context });

@@ -143,7 +143,7 @@ function saveIndex(dir, idx) {
   fs.writeFileSync(indexFile(dir), JSON.stringify(idx));
 }
 
-const readText = (abs) => {
+export const readText = (abs) => {
   try {
     const t = fs.readFileSync(abs, "utf8");
     return t.includes("\u0000") ? null : t;
@@ -236,7 +236,7 @@ const STOP = new Set(
     "please help write create implement fix does work works working").split(" "),
 );
 
-function outlineText(idx, maxChars, perFile = 15) {
+export function outlineText(idx, maxChars, perFile = 15) {
   const rows = Object.entries(idx.files)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([rel, f]) => `${rel}${f.symbols.length ? `: ${f.symbols.slice(0, perFile).join(", ")}` : ""}`);
@@ -249,7 +249,7 @@ function outlineText(idx, maxChars, perFile = 15) {
 }
 
 // The local model reads the outline and picks the files that matter, plus search terms to look for.
-async function pickFiles(request, outlineStr, model) {
+export async function pickFiles(request, outlineStr, model) {
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -282,7 +282,7 @@ async function pickFiles(request, outlineStr, model) {
 }
 
 // The full definition of a function/class: from its declaration to where the block closes (max 120 lines).
-function definition(text, name) {
+export function definition(text, name) {
   const n = name.replace(/[^\w$]/g, "");
   if (!n) return null;
   const lines = text.split("\n");
@@ -333,7 +333,7 @@ function bestParts(rel, text, limit, scored, entry, words = []) {
   return header + picked.map((c) => `… lines ${c.start}-${c.end}:\n${lines.slice(c.start - 1, c.end).join("\n")}`).join("\n");
 }
 
-const cut = (s, n) => (s.length > n ? `${s.slice(0, n)}\n… (${s.length - n} more characters cut)` : s);
+export const cut = (s, n) => (s.length > n ? `${s.slice(0, n)}\n… (${s.length - n} more characters cut)` : s);
 
 // Returns { text, sources: [{ path, why, lines? }], ms }.
 export async function projectContext(dir, request, { budget = 36000, model = DEFAULT_MODEL } = {}) {
