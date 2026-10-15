@@ -1006,7 +1006,7 @@ async function sendMessage(override = {}) {
     let route = target === "smart" ? null : { to: target, reason: typed || override.reason || (target === "claude" ? "you chose Claude" : "you chose local"), by: "you" };
     if (!route) {
       const r = await api("/api/route", { project: state.project, prompt: text });
-      route = { to: r.route, reason: r.reason, by: r.by };
+      route = { to: r.route, reason: r.reason, by: r.by, effort: r.effort };
       mine.route = route;
       pending.from = route.to === "claude" ? "claude" : "local";
       pending.model = route.to === "local" ? localModel : "";
@@ -1015,7 +1015,7 @@ async function sendMessage(override = {}) {
       tick();
     }
     if (route.to === "claude") {
-      const out = await api("/api/claude", { project: state.project, prompt: text, ...claudeOpts(), plan, useHistory, route });
+      const out = await api("/api/claude", { project: state.project, prompt: text, ...claudeOpts(), autoEffort: target === "smart" ? route.effort : "", plan, useHistory, route });
       if (out.isError) toast("Claude Code reported an error; see its reply", true);
     } else {
       await api("/api/chat", { project: state.project, prompt: text, model: localModel, useHistory, plan, route: target === "smart" || typed || override.reason ? route : null });

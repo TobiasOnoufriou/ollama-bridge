@@ -15,7 +15,7 @@ import { usage } from "./usage.mjs";
 // How the smart router decided, stored on the prompt's log entry so the UI can show it.
 function routeMeta(route) {
   if (!route || !["local", "claude"].includes(route.to)) return {};
-  return { route: { to: route.to, reason: String(route.reason || "").slice(0, 160), by: String(route.by || "").slice(0, 20) } };
+  return { route: { to: route.to, reason: String(route.reason || "").slice(0, 160), by: String(route.by || "").slice(0, 20), ...(["low", "medium"].includes(route.effort) ? { effort: route.effort } : {}) } };
 }
 
 const DEFAULT_PORT = 4317;
@@ -101,6 +101,7 @@ async function route(req, res, url) {
         model: body.model || "",
         mode: body.plan === true ? "plan" : body.mode || "",
         effort: body.effort || "",
+        autoEffort: body.autoEffort || "",
         fast: body.fast === true,
         useHistory: body.useHistory !== false,
         meta: routeMeta(body.route),

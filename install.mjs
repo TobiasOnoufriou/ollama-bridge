@@ -319,15 +319,8 @@ async function setupPath() {
 function claudeMdBlock(cfg) {
   return `${MARK_START}
 ## Local models (ollama-bridge)
-
-The \`ollama-bridge\` MCP server gives you \`ask_local\`, which sends a prompt to a local model in Ollama.
-- Offload simple, well-defined work to it to save usage: boilerplate, small self-contained functions,
-  summaries, test drafts, explanations, renaming/reformatting. Paste in any code it needs (it can't read files),
-  use \`use_history: false\` for one-off tasks, and always review its output before using it.
-- For reasoning-heavy questions, debugging logic or a second opinion, call it with \`model: "${cfg.reasoningModel}"\`
-  (slower and verbose). The default model (${cfg.bridgeModel}) is for quick code tasks.
-- Keep anything needing judgement across the codebase, multi-file edits or tool use yourself.
-- \`local_history\` shows the shared log, including messages the user sent the local model with \`local-chat\`.
+Offload simple, self-contained tasks to \`ask_local\` to save usage (\`model: "${cfg.reasoningModel}"\` for a second
+opinion). Keep multi-file, tool-using or judgement-heavy work yourself.
 ${MARK_END}`;
 }
 

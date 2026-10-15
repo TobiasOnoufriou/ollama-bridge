@@ -52,12 +52,6 @@ export function saveLog(log, dir = projectDir()) {
   fs.writeFileSync(file, JSON.stringify(log, null, 2));
 }
 
-// Append entries to a project's log, re-reading it first so concurrent writers don't drop messages.
-export function appendMessages(dir, ...entries) {
-  const log = loadLog(dir);
-  log.messages.push(...entries);
-  saveLog(log, dir);
-}
 
 // Convert the shared log into Ollama chat messages, newest last, trimmed to the char budget.
 function toOllamaMessages(entries) {

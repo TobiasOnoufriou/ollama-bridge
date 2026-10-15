@@ -123,10 +123,28 @@ Under the message box, choose where a message goes: **Local** (the model picked 
 3. If Ollama isn't running, short questions stay local and everything else goes to Claude.
 
 Each prompt shows where it went and why (for example *Smart → Claude · mentions ui-server.mjs in this project*).
-When a message goes to Claude, Claude Code runs non-interactively (`claude -p`) in the project folder with the
-recent shared conversation as context, and its reply is added to the same conversation. In the **Normal**
-start mode it can read but not change files (there's no one to approve edits); choose **Auto-accept edits**
-if you want it to make changes. Claude Code's CLI must be signed in once: run `claude` and type `/login`.
+When a message goes to Claude, Claude Code runs non-interactively (`claude -p`) in the project folder and its
+reply is added to the same conversation. In the **Normal** start mode it can read but not change files (there's
+no one to approve edits); choose **Auto-accept edits** if you want it to make changes. Claude Code's CLI must be
+signed in once: run `claude` and type `/login`.
+
+**Smart effort.** When Settings → Effort is left on *Default*, Smart also picks an effort for Claude: **low** for
+a quick lookup or a short question about one file, **medium** for anything else (fixing, debugging, several
+steps). It never picks above medium; an effort you choose in Settings always wins. Replies show it, e.g.
+*Claude Code (low effort, auto)*.
+
+#### How Claude runs from the chat stay cheap
+
+- **One session per project.** The first run starts a Claude Code session and later runs resume it
+  (`--resume`), so the system prompt and earlier turns come from Claude's prompt cache, and only shared
+  messages Claude hasn't seen yet are sent. Clearing the conversation starts a new session.
+- **Read-only toolset.** In Normal and Plan mode the run gets only Read, Grep and Glob and skips MCP servers and
+  skills (`--tools Read,Grep,Glob --strict-mcp-config --disable-slash-commands`), cutting most of a fresh
+  session's input. Auto-accept edits and Auto mode keep the full toolset.
+- **Measured** (Haiku, a question about one file, then a follow-up): 106.6k input tokens and $0.045 before;
+  43.2k tokens, mostly cache reads, and $0.011 after, about 75% less.
+- The bridge's tool descriptions and its `~/.claude/CLAUDE.md` section, which load into every Claude Code
+  session, are about 60% shorter, and `local_history` returns at most about 4,000 characters.
 
 ### Usage
 
