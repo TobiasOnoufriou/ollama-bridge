@@ -47,6 +47,8 @@ Everything goes through one command:
 
 ```bash
 ollama-bridge ui                 # web UI at http://127.0.0.1:4317 (opens your browser)
+ollama-bridge ask "explain this regex: ^\d{3}$"   # smart prompt: local model or Claude Code, then the answer
+ollama-bridge ask --claude "why do the tests fail?"  # force a side (--local / --claude), --model, --plan
 ollama-bridge chat               # chat in the terminal, in this folder's shared log
 ollama-bridge chat deepseek-r1:14b
 ollama-bridge claude             # Claude Code on the local model (qwen3.6-cc by default)
@@ -95,6 +97,25 @@ Under the buttons, pick how they start (remembered in your browser):
   selectable; the ones that don't (`qwen2.5-coder`, `deepseek-r1`) are shown greyed out.
 - **Start in:** Normal, **Plan mode** (Claude researches and proposes a plan before changing anything),
   Auto-accept edits or Auto mode.
+
+### Smart prompt: local model or Claude?
+
+Under the message box, choose where a message goes: **Local** (the model picked at the top), **Claude**
+(Claude Code, using the Claude model and start mode from the project settings) or **Smart**, which decides:
+
+1. **Rules first (instant).** Prompts that name a file (`app.js`, `src/utils.py`, ...), mention a file in the
+   project, ask for project work (refactor, implement, run the tests, edit files, review my code...) or are very
+   long go to Claude. Code pasted in a fenced block doesn't count as naming a file.
+2. **Otherwise the local model classifies it** (about 0.3 s once loaded). Explanations, snippets, regex, SQL,
+   conversions and short summaries stay local; anything needing files, several steps, debugging, design
+   decisions or high accuracy goes to Claude. When unsure it picks Claude.
+3. If Ollama isn't running, short questions stay local and everything else goes to Claude.
+
+Each prompt shows where it went and why (for example *Smart → Claude · mentions ui-server.mjs in this project*).
+When a message goes to Claude, Claude Code runs non-interactively (`claude -p`) in the project folder with the
+recent shared conversation as context, and its reply is added to the same conversation. In the **Normal**
+start mode it can read but not change files (there's no one to approve edits); choose **Auto-accept edits**
+if you want it to make changes. Claude Code's CLI must be signed in once: run `claude` and type `/login`.
 
 ### Plan mode for the local models
 

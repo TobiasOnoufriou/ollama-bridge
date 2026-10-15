@@ -239,6 +239,21 @@
     padding: 1px 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent);
   }
 
+  /* Send-to switch + routing chips */
+  .target { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; flex: none; }
+  .target button { border: none; border-radius: 0; padding: 8px 11px; background: transparent; color: var(--muted); font-size: 13px; }
+  .target button + button { border-left: 1px solid var(--border); }
+  .target button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .route-chip { font-size: 11px; color: var(--muted); display: inline-flex; gap: 4px; align-items: center; }
+  .route-chip b { font-weight: 600; }
+  .route-chip.to-claude b { color: var(--claude); }
+  .route-chip.to-local b { color: var(--local); }
+  .content.error, .msg.err .content { color: var(--bad); }
+  /* Composer: message box on its own row, controls underneath */
+  .composer .inner { flex-wrap: wrap; align-items: center; }
+  .composer textarea { flex: 1 1 100%; }
+  .composer #sendBtn { margin-left: auto; padding: 8px 18px; }
+
   /* Deleting projects */
   .project-row { position: relative; }
   .project-row .project { padding-right: 36px; }
@@ -325,7 +340,12 @@
   <div class="composer">
     <div class="inner">
       <textarea id="input" rows="1" placeholder="Message the local model…"></textarea>
-      <label class="plan-toggle" title="Plan mode: the model replies with a step-by-step plan instead of doing the task">
+      <div class="target" role="radiogroup" aria-label="Send to">
+        <button type="button" data-target="local" title="Always use the local model selected at the top">Local</button>
+        <button type="button" data-target="smart" title="Smart prompt: picks the local model for simple, self-contained requests and Claude Code for anything that needs your project's files or careful work">Smart</button>
+        <button type="button" data-target="claude" title="Always use Claude Code (model and start mode from the settings above)">Claude</button>
+      </div>
+      <label class="plan-toggle" title="Plan mode: the reply is a step-by-step plan instead of doing the task">
         <input type="checkbox" id="planMode"><span>Plan</span></label>
       <button class="primary" id="sendBtn">Send</button>
     </div>
@@ -455,9 +475,10 @@ function msgHtml(m) {
   const letter = kind === "claude" ? "C" : kind === "human" ? "Y" : "L";
   const time = m.ts ? `<time>${new Date(m.ts).toLocaleString()}</time>` : "";
   const model = (m.model ? `<span class="model">${esc(m.model)}</span>` : "") + (m.mode === "plan" ? '<span class="badge-plan">Plan</span>' : "");
-  return `<div class="msg ${kind} ${m.pending ? "pending" : ""}">
+  const route = m.route ? `<span class="route-chip to-${m.route.to}" title="${esc(m.route.by === "you" ? "Chosen by you" : m.route.by === "rules" ? "Decided by a rule" : "Decided by the local classifier")}">${m.route.by === "you" ? "→" : "Smart →"} <b>${m.route.to === "claude" ? "Claude" : "Local"}</b> · ${esc(m.route.reason)}</span>` : "";
+  return `<div class="msg ${kind} ${m.pending ? "pending" : ""} ${m.error ? "err" : ""}">
     <div class="avatar">${letter}</div>
-    <div class="bubble"><div class="who"><span class="n">${name}</span>${model}${time}</div>
+    <div class="bubble"><div class="who"><span class="n">${name}</span>${model}${time}${route}</div>
     <div class="content">${m.pending ? esc(m.content) : renderMarkdown(m.content)}</div></div></div>`;
 }
 
@@ -723,28 +744,60 @@ async function loadStatus() {
 }
 
 // ---- actions
+// Send to: "local" (the model picked at the top), "claude" (Claude Code) or "smart" (the router decides).
+const getTarget = () => document.querySelector(".target .on")?.dataset.target || "smart";
+function setTarget(t) {
+  for (const b of document.querySelectorAll(".target button")) b.classList.toggle("on", b.dataset.target === t);
+  store.set("target", t);
+  $("model").title = t === "claude" ? "Not used when sending to Claude" : "Local model to reply";
+  $("input").placeholder = $("planMode").checked ? "Describe what you want planned…"
+    : t === "claude" ? "Ask Claude Code about this project…" : t === "smart" ? "Ask anything; Smart picks local or Claude…" : "Message the local model…";
+}
+
 async function sendMessage() {
   const text = $("input").value.trim();
   if (!text || state.sending || !state.project) return;
-  const model = $("model").value;
+  const target = getTarget();
+  const localModel = $("model").value;
   const plan = $("planMode").checked;
+  const useHistory = $("useHistory").checked;
   state.sending = true;
   $("sendBtn").disabled = true;
   $("input").value = "";
   autosize();
-  state.messages.push({ from: "human", content: text, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) });
-  const verb = plan ? "Planning" : "Thinking";
-  const pending = { from: "local", model, content: `${verb}… 0s`, pending: true, ...(plan ? { mode: "plan" } : {}) };
+  const mine = { from: "human", content: text, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) };
+  state.messages.push(mine);
+  const pending = { from: target === "claude" ? "claude" : "local", model: target === "local" ? localModel : "", content: "", pending: true, ...(plan ? { mode: "plan" } : {}) };
   state.messages.push(pending);
-  renderMessages(true);
+  let verb = target === "smart" ? "Routing" : target === "claude" ? (plan ? "Claude Code is planning" : "Claude Code is working") : plan ? "Planning" : "Thinking";
   const started = Date.now();
-  const timer = setInterval(() => {
+  const tick = () => {
     pending.content = `${verb}… ${Math.round((Date.now() - started) / 1000)}s`;
     const el = document.querySelector(".msg.pending .content");
     if (el) el.textContent = pending.content;
-  }, 1000);
+  };
+  tick();
+  renderMessages(true);
+  const timer = setInterval(tick, 1000);
   try {
-    await api("/api/chat", { project: state.project, prompt: text, model, useHistory: $("useHistory").checked, plan });
+    let route = target === "smart" ? null : { to: target, reason: target === "claude" ? "you chose Claude" : "you chose local", by: "you" };
+    if (!route) {
+      const r = await api("/api/route", { project: state.project, prompt: text });
+      route = { to: r.route, reason: r.reason, by: r.by };
+      mine.route = route;
+      pending.from = route.to === "claude" ? "claude" : "local";
+      pending.model = route.to === "local" ? localModel : "";
+      verb = route.to === "claude" ? (plan ? "Claude Code is planning" : "Claude Code is working") : plan ? "Planning" : "Thinking";
+      renderMessages(true);
+      tick();
+    }
+    if (route.to === "claude") {
+      const mode = $("startMode").value;
+      const out = await api("/api/claude", { project: state.project, prompt: text, model: $("claudeModel").value, mode, plan, useHistory, route });
+      if (out.isError) toast("Claude Code reported an error; see its reply", true);
+    } else {
+      await api("/api/chat", { project: state.project, prompt: text, model: localModel, useHistory, plan, route: target === "smart" ? route : null });
+    }
   } catch (e) {
     pending.content = `Error: ${e.message}`;
     pending.pending = false;
@@ -803,9 +856,12 @@ for (const id of ["claudeModel", "localModel", "startMode"]) {
   $(id).addEventListener("change", () => store.set(id, $(id).value));
 }
 $("planMode").addEventListener("change", () => {
-  const on = $("planMode").checked;
-  store.set("planMode", on ? "1" : "");
-  $("input").placeholder = on ? "Describe what you want planned…" : "Message the local model…";
+  store.set("planMode", $("planMode").checked ? "1" : "");
+  setTarget(getTarget());
+});
+document.querySelector(".target").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-target]");
+  if (b) setTarget(b.dataset.target);
 });
 $("sendBtn").addEventListener("click", sendMessage);
 $("input").addEventListener("input", autosize);
@@ -850,7 +906,8 @@ $("closeDlg").addEventListener("click", () => $("statusDlg").close());
 // ---- start: live-refresh so messages from Claude appear on their own
 (async () => {
   await loadProjects();
-  if (store.get("planMode") === "1") { $("planMode").checked = true; $("planMode").dispatchEvent(new Event("change")); }
+  if (store.get("planMode") === "1") $("planMode").checked = true;
+  setTarget(["local", "smart", "claude"].includes(store.get("target")) ? store.get("target") : "smart");
   await Promise.all([loadHistory(true), loadModels(), loadLaunchOptions()]);
   loadStatus();
   setInterval(() => loadHistory().catch(() => {}), 3000);

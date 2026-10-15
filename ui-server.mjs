@@ -8,6 +8,14 @@ import { chat, loadLog, saveLog } from "./lib.mjs";
 import { checkStatus, modelsWithRoles, effectiveConfig } from "./status.mjs";
 import { allProjects, addProject, removeProject, isKnownProject, claudeCodeProjects, completeDir } from "./projects.mjs";
 import { pickFolder, launchIn, CLAUDE_MODELS, START_MODES } from "./launch.mjs";
+import { routePrompt } from "./router.mjs";
+import { runClaude } from "./claude-run.mjs";
+
+// How the smart router decided, stored on the prompt's log entry so the UI can show it.
+function routeMeta(route) {
+  if (!route || !["local", "claude"].includes(route.to)) return {};
+  return { route: { to: route.to, reason: String(route.reason || "").slice(0, 160), by: String(route.by || "").slice(0, 20) } };
+}
 
 const DEFAULT_PORT = 4317;
 const INDEX = path.join(HERE, "ui", "index.html");
@@ -74,9 +82,26 @@ async function route(req, res, url) {
         model: body.model || undefined,
         useHistory: body.useHistory !== false,
         plan: body.plan === true,
+        meta: routeMeta(body.route),
         dir: projectParam(body.project),
       });
       return send(res, 200, { ...out, ms: Date.now() - started });
+    }
+    if (pathname === "/api/route") {
+      if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
+      return send(res, 200, await routePrompt(body.prompt, { dir: projectParam(body.project) }));
+    }
+    if (pathname === "/api/claude") {
+      if (!body.prompt?.trim()) return send(res, 400, { error: "Empty message" });
+      const out = await runClaude({
+        dir: projectParam(body.project),
+        prompt: body.prompt,
+        model: body.model || "",
+        mode: body.plan === true ? "plan" : body.mode || "",
+        useHistory: body.useHistory !== false,
+        meta: routeMeta(body.route),
+      });
+      return send(res, 200, out);
     }
     if (pathname === "/api/projects/add") return send(res, 200, { project: addProject(body.path) });
     if (pathname === "/api/projects/remove") {
@@ -133,6 +158,8 @@ export async function startUi({ port = DEFAULT_PORT, open = true } = {}) {
       send(res, 500, { error: err.message });
     }
   });
+  // Claude Code and slow local models can take minutes; don't let Node cut requests off at 5.
+  server.requestTimeout = 0;
   actualPort = await listen(server, port);
   const url = `http://127.0.0.1:${actualPort}`;
   console.log(`ollama-bridge UI running at ${url}  (Ctrl+C to stop)`);

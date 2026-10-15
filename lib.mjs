@@ -52,6 +52,13 @@ export function saveLog(log, dir = projectDir()) {
   fs.writeFileSync(file, JSON.stringify(log, null, 2));
 }
 
+// Append entries to a project's log, re-reading it first so concurrent writers don't drop messages.
+export function appendMessages(dir, ...entries) {
+  const log = loadLog(dir);
+  log.messages.push(...entries);
+  saveLog(log, dir);
+}
+
 // Convert the shared log into Ollama chat messages, newest last, trimmed to the char budget.
 function toOllamaMessages(entries) {
   const out = [];
@@ -86,9 +93,10 @@ export function listProjects() {
     .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 }
 
-export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true, plan = false, dir = projectDir() }) {
+// meta: extra fields stored on the prompt's log entry (e.g. how the smart router chose this model).
+export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true, plan = false, meta = {}, dir = projectDir() }) {
   const log = loadLog(dir);
-  const entry = { from, content: prompt, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) };
+  const entry = { from, content: prompt, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}), ...meta };
   const history = useHistory ? [...log.messages, entry] : [entry];
 
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {

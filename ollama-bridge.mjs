@@ -4,9 +4,11 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { spawnSync } from "node:child_process";
 import { HERE } from "./config.mjs";
-import { loadLog, saveLog, logPath, projectDir } from "./lib.mjs";
+import { chat, loadLog, saveLog, logPath, projectDir } from "./lib.mjs";
 import { allProjects, addProject, removeProject, resolveUserPath } from "./projects.mjs";
 import { launchIn, LAUNCH_TARGETS } from "./launch.mjs";
+import { routePrompt } from "./router.mjs";
+import { runClaude } from "./claude-run.mjs";
 import { checkStatus, modelsWithRoles, effectiveConfig } from "./status.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -22,6 +24,8 @@ const HELP = `${bold("ollama-bridge")} - Claude Code + local Ollama models with 
 ${bold("Usage:")} ollama-bridge <command> [options]
 
   ${cyan("ui")} [--port N] [--no-open]   Open the web UI (projects, shared conversations, chat, status)
+  ${cyan("ask")} "<prompt>"              Smart prompt: routes to the local model or Claude Code, then answers
+                              --local / --claude to force a side, --model <name>, --plan
   ${cyan("chat")} [model]                Chat with a local model in this folder's shared log
   ${cyan("claude")} [claude args]        Run Claude Code on the local model (same as claude-local)
   ${cyan("status")}                      Check that everything is installed and wired up
@@ -58,6 +62,34 @@ switch (cmd) {
     const { startUi } = await import("./ui-server.mjs");
     const i = args.indexOf("--port");
     await startUi({ port: i !== -1 ? Number(args[i + 1]) : undefined, open: !flag("--no-open") });
+    break;
+  }
+
+  case "ask": {
+    const modelArg = args.includes("--model") ? args[args.indexOf("--model") + 1] : "";
+    const prompt = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--model").join(" ").trim();
+    if (!prompt) {
+      console.error(red('Usage: ollama-bridge ask "<prompt>" [--local | --claude] [--model name] [--plan]'));
+      process.exit(1);
+    }
+    const plan = flag("--plan");
+    const route = flag("--local") ? { to: "local", reason: "you chose local", by: "you" }
+      : flag("--claude") ? { to: "claude", reason: "you chose Claude", by: "you" }
+      : await routePrompt(prompt, { dir: projectDir() }).then((r) => ({ to: r.route, reason: r.reason, by: r.by }));
+    console.log(dim(`-> ${route.to === "local" ? "local model" : "Claude Code"}: ${route.reason}${plan ? " (plan mode)" : ""}\n`));
+    try {
+      if (route.to === "local") {
+        const { reply, model } = await chat({ from: "human", prompt, model: modelArg || undefined, plan, meta: { route } });
+        console.log(`${bold(yellow(model))}\n${reply}`);
+      } else {
+        const out = await runClaude({ dir: projectDir(), prompt, model: modelArg, mode: plan ? "plan" : "", meta: { route } });
+        console.log(`${bold(cyan(out.model))}${dim(` ${(out.ms / 1000).toFixed(0)}s`)}\n${out.reply}`);
+        if (out.isError) process.exit(1);
+      }
+    } catch (err) {
+      console.error(red(err.message));
+      process.exit(1);
+    }
     break;
   }
 
