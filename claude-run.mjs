@@ -2,7 +2,7 @@
 // The prompt goes in on stdin, so it never passes through a shell.
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { loadLog, saveLog } from "./lib.mjs";
+import { loadLog, saveLog, defaultSub } from "./lib.mjs";
 import { claudeArgs } from "./launch.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -79,12 +79,13 @@ function spawnClaude(args, opts) {
   });
 }
 
-// Each project keeps one Claude Code session per toolset ("read" or "full") in its log, and later runs resume it:
-// the system prompt and earlier turns then come from Claude's prompt cache instead of being sent fresh.
+// Each project (and each of its sub-sessions) keeps one Claude Code session per toolset in its log, and later runs
+// resume it: the system prompt and earlier turns then come from Claude's prompt cache instead of being sent fresh.
 // autoEffort: Smart's suggestion ("low" or "medium"), used only when no effort is set.
 // Returns { reply, model, ms, costUsd, usage, isError }.
 // logText: what the log shows for the prompt (e.g. a short label instead of a pasted plan).
-export async function runClaude({ dir, prompt, model = "", mode: startMode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [] }) {
+// sub: the sub-session ("" = main).
+export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", mode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [] }) {
   const usedEffort = effort || (AUTO_EFFORTS.has(autoEffort) ? autoEffort : "");
   const mode = startMode || "acceptEdits";
   const profile = mode === "plan" ? "read" : mode === "acceptEdits" ? "edit" : "full";
@@ -101,7 +102,7 @@ export async function runClaude({ dir, prompt, model = "", mode: startMode = "",
     }
   }
 
-  const log = loadLog(dir);
+  const log = loadLog(dir, sub);
   const saved = useHistory ? log.claude?.[profile] : null;
   const context = (session, upTo) => (useHistory ? sharedContext(log.messages.slice(session ? upTo : 0), session, exclude) : "");
   let r = await runOnce(saved ? [...base, "--resume", saved.session] : base, prompt + context(saved?.session, saved?.upTo), dir, env);
@@ -148,7 +149,7 @@ export async function runClaude({ dir, prompt, model = "", mode: startMode = "",
     usage.costUsd = costUsd;
   }
   // Re-read before saving: other writers may have added messages while Claude was working.
-  const fresh = loadLog(dir);
+  const fresh = loadLog(dir, sub);
   fresh.messages.push({ ...entry, ...tag }, {
     from: "claude",
     model: label,
@@ -162,6 +163,6 @@ export async function runClaude({ dir, prompt, model = "", mode: startMode = "",
   if (session && !isError && useHistory) {
     fresh.claude = { ...fresh.claude, [profile]: { session, upTo: fresh.messages.length, ...(sessionCost != null ? { costTotal: sessionCost } : {}) } };
   }
-  saveLog(fresh, dir);
+  saveLog(fresh, dir, sub);
   return { reply, model: label, ms, costUsd, usage, isError };
 }

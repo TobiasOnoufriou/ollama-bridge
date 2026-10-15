@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { OLLAMA_URL, DEFAULT_MODEL, loadLog, saveLog } from "./lib.mjs";
+import { OLLAMA_URL, DEFAULT_MODEL, loadLog, saveLog, defaultSub } from "./lib.mjs";
 import { recentTranscripts, transcriptFor, contextSize, fmtK } from "./session-hint.mjs";
 
 const DIGEST_CHARS = 40000; // ~10k tokens, leaves room in a 32k context for the instructions and the reply
@@ -83,7 +83,8 @@ Write the note in this shape, at most 250 words, no preamble:
 Only state what the transcript shows. Don't list every file (a list is added for you).`;
 
 // { note, file, tokens } for the most recent session in dir (or the given session id).
-export async function handoff({ dir, session = "", model = DEFAULT_MODEL } = {}) {
+// sub: the bridge sub-session whose log gets the note (session is the Claude Code session to summarise).
+export async function handoff({ dir, session = "", sub = defaultSub(), model = DEFAULT_MODEL } = {}) {
   const file = session ? transcriptFor(session, dir) : recentTranscripts(dir)[0];
   if (!file) throw new Error(`No Claude Code session found for ${dir}${session ? ` with id ${session}` : ""}.`);
   const d = digest(file, dir);
@@ -113,13 +114,13 @@ export async function handoff({ dir, session = "", model = DEFAULT_MODEL } = {})
   const note = `Continuing from a previous session (hand-off note):\n\n${summary}\n\n${facts.join("\n")}`.trim();
 
   // Keep it in the project's shared log too, so it shows in the web UI and local_history.
-  const log = loadLog(dir);
+  const log = loadLog(dir, sub);
   const ts = new Date().toISOString();
   log.messages.push(
     { from: "human", content: `Hand-off note for a new Claude Code session (from ${path.basename(file, ".jsonl")})`, ts, mode: "handoff" },
     { from: "local", model, content: note, ts, mode: "handoff", usage: { in: data.prompt_eval_count || 0, out: data.eval_count || 0, ms: Math.round((data.total_duration || 0) / 1e6) } },
   );
-  saveLog(log, dir);
+  saveLog(log, dir, sub);
   return { note, file, size: contextSize(file), model };
 }
 

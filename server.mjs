@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Minimal MCP stdio server (newline-delimited JSON-RPC) exposing a local Ollama model to Claude Code.
 import readline from "node:readline";
-import { chat, listModels, loadLog, saveLog, logPath, projectDir, DEFAULT_MODEL, REASONING_MODEL } from "./lib.mjs";
+import { chat, listModels, loadLog, clearLog, logPath, projectDir, DEFAULT_MODEL, REASONING_MODEL } from "./lib.mjs";
 import { planAndLog } from "./planner.mjs";
 
 // These descriptions load into every Claude Code session on the machine, so keep them short.
@@ -79,7 +79,7 @@ async function callTool(name, args = {}) {
       return historyText(msgs);
     }
     case "reset_local_history": {
-      saveLog({ project: projectDir(), messages: [] });
+      clearLog();
       return `Cleared ${logPath()}.`;
     }
     case "list_local_models":

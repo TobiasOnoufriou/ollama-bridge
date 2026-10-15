@@ -36,6 +36,9 @@ per-machine state lives under it, not in the user's projects:
 - `logs/<sanitised-project-path>.json`: the **shared conversation log** per project folder. Claude (via MCP),
   the user (`chat`/web UI) and local models all append to the same file. `lib.mjs` `chat()` re-reads the log
   just before saving because other processes may have written meanwhile; keep that pattern for any log writes.
+- `logs/sessions/<key>/<id>.json`: named sub-sessions of a project (separate conversations, each with its own
+  resumed Claude session in `log.claude`). Log functions take `(dir, sub)`; `sub` "" is the main log above and
+  defaults to `OLLAMA_BRIDGE_SESSION` (`defaultSub()`), so the UI server must always pass it explicitly.
 - `logs/index/` (embedding/outline cache for `context.mjs`), `logs/issues/` (issue text handed to Claude),
   `projects.json`, `models/*.Modelfile`, `fast-mode.settings.json`: all generated, all gitignored.
 
