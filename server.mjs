@@ -3,52 +3,53 @@
 import readline from "node:readline";
 import { chat, listModels, loadLog, saveLog, logPath, projectDir, DEFAULT_MODEL, REASONING_MODEL } from "./lib.mjs";
 
+// These descriptions load into every Claude Code session on the machine, so keep them short.
 const TOOLS = [
   {
     name: "ask_local",
     description:
-      `Send a message to the local LLM running in Ollama (default model: ${DEFAULT_MODEL}). ` +
-      "Use it to offload simple, well-defined work (boilerplate, small functions, summaries, test drafts, " +
-      "explanations, second opinions) to save Claude usage. The local model shares a per-project conversation " +
-      "log with Claude and the human, so it remembers earlier exchanges. It cannot read files: paste in any code " +
-      "it needs. Always review its output before using it.",
+      `Offload simple, self-contained work (snippets, summaries, test drafts, explanations) to a local model ` +
+      `(${DEFAULT_MODEL}) to save usage. It can't read files: paste what it needs. Review its output.`,
     inputSchema: {
       type: "object",
       properties: {
-        prompt: { type: "string", description: "The message or task for the local model, including any code it needs." },
-        model: {
-          type: "string",
-          description:
-            `Optional Ollama model to use instead of the default. Use "${REASONING_MODEL}" for reasoning-heavy ` +
-            "questions, debugging logic or second opinions (slower, verbose); keep the default for quick code tasks.",
-        },
-        use_history: {
-          type: "boolean",
-          description: "Include the shared conversation history (default true). Set false for one-off tasks to keep it fast.",
-        },
+        prompt: { type: "string" },
+        model: { type: "string", description: `Other Ollama model; "${REASONING_MODEL}" for reasoning or a second opinion.` },
+        use_history: { type: "boolean", description: "Send the shared project log (default true); false for one-offs." },
+        plan: { type: "boolean", description: "Reply with a step-by-step plan instead of doing the task." },
       },
       required: ["prompt"],
     },
   },
   {
     name: "local_history",
-    description: "Read the shared conversation log with the local LLM for this project, including messages the human sent it directly.",
-    inputSchema: {
-      type: "object",
-      properties: { last: { type: "number", description: "Only return the last N messages (default 20)." } },
-    },
+    description: "Recent messages in this project's shared log with the local model, including the user's own.",
+    inputSchema: { type: "object", properties: { last: { type: "number", description: "Messages to return (default 10)." } } },
   },
-  {
-    name: "reset_local_history",
-    description: "Clear the shared conversation log with the local LLM for this project.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "list_local_models",
-    description: "List the models installed in Ollama.",
-    inputSchema: { type: "object", properties: {} },
-  },
+  { name: "reset_local_history", description: "Clear this project's shared log.", inputSchema: { type: "object", properties: {} } },
+  { name: "list_local_models", description: "List installed Ollama models.", inputSchema: { type: "object", properties: {} } },
 ];
+
+// local_history output lands in Claude's context: keep it bounded.
+const HISTORY_MSG_CHARS = 800;
+const HISTORY_TOTAL_CHARS = 4000;
+function historyText(messages) {
+  const parts = [];
+  let total = 0;
+  for (const m of messages.slice().reverse()) {
+    const body = m.content.length > HISTORY_MSG_CHARS
+      ? `${m.content.slice(0, HISTORY_MSG_CHARS)}… (${m.content.length - HISTORY_MSG_CHARS} more chars cut)`
+      : m.content;
+    const part = `--- ${m.from}${m.model ? ` (${m.model})` : ""} @ ${m.ts}\n${body}`;
+    if (total + part.length > HISTORY_TOTAL_CHARS && parts.length) {
+      parts.unshift(`(${messages.length - parts.length} older messages not shown)`);
+      break;
+    }
+    total += part.length;
+    parts.unshift(part);
+  }
+  return parts.join("\n\n");
+}
 
 async function callTool(name, args = {}) {
   switch (name) {
@@ -58,13 +59,14 @@ async function callTool(name, args = {}) {
         prompt: args.prompt,
         model: args.model || undefined,
         useHistory: args.use_history !== false,
+        plan: args.plan === true,
       });
       return `[${model}]\n${reply}`;
     }
     case "local_history": {
-      const msgs = loadLog().messages.slice(-(args.last || 20));
+      const msgs = loadLog().messages.slice(-Math.min(Math.max(1, Number(args.last) || 10), 50));
       if (!msgs.length) return `No history yet for ${projectDir()}.`;
-      return msgs.map((m) => `--- ${m.from}${m.model ? ` (${m.model})` : ""} @ ${m.ts}\n${m.content}`).join("\n\n");
+      return historyText(msgs);
     }
     case "reset_local_history": {
       saveLog({ project: projectDir(), messages: [] });

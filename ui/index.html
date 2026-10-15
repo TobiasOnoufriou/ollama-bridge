@@ -1,0 +1,1355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ollama-bridge</title>
+<style>
+  :root {
+    --bg: #f6f6f3;
+    --panel: #ffffff;
+    --sidebar: #efefeb;
+    --border: #dcdcd6;
+    --text: #1d1d1b;
+    --muted: #6b6b66;
+    --accent: #3b5bdb;
+    --accent-soft: #e7ecfd;
+    --claude: #b4532a;
+    --claude-soft: #fbece4;
+    --you: #3b5bdb;
+    --you-soft: #e9eefc;
+    --local: #2b8a3e;
+    --local-soft: #e6f4e9;
+    --ok: #2b8a3e;
+    --warn: #c77700;
+    --bad: #c92a2a;
+    --code-bg: #f1f1ed;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .06);
+    --radius: 10px;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615;
+      --panel: #1f1f1d;
+      --sidebar: #1a1a19;
+      --border: #33332f;
+      --text: #ecece8;
+      --muted: #9a9a93;
+      --accent: #7c9bff;
+      --accent-soft: #24304f;
+      --claude: #f08c5a;
+      --claude-soft: #3a261b;
+      --you: #7c9bff;
+      --you-soft: #222c47;
+      --local: #69c27d;
+      --local-soft: #1d3324;
+      --ok: #69c27d;
+      --warn: #f2b04b;
+      --bad: #ff7b7b;
+      --code-bg: #141413;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    overflow: hidden;
+  }
+  button, select, textarea, input { font: inherit; color: inherit; }
+  button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+  button.ghost:hover { color: var(--text); border-color: var(--border); }
+
+  /* Sidebar */
+  aside {
+    background: var(--sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .brand { padding: 16px 16px 8px; font-weight: 650; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .brand .logo { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--claude), var(--local)); }
+  .section-label { padding: 12px 16px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  #projects { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+  .project {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 1px solid transparent;
+    background: transparent;
+    padding: 8px 10px;
+    margin-bottom: 2px;
+  }
+  .project:hover { background: var(--panel); border-color: var(--border); }
+  .project.active { background: var(--panel); border-color: var(--border); box-shadow: var(--shadow); }
+  .project .name { font-weight: 550; display: flex; align-items: center; gap: 6px; }
+  .project .meta { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tag { font-size: 10px; padding: 1px 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .status-btn { margin: 8px; display: flex; align-items: center; gap: 8px; justify-content: flex-start; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); }
+  .dot.bad { background: var(--warn); }
+
+  /* Main */
+  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    flex-wrap: wrap;
+  }
+  header .title { flex: 1; min-width: 160px; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .path { font-size: 12px; color: var(--muted); font-family: var(--mono); word-break: break-all; }
+  .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  select { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; max-width: 260px; }
+  label.toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
+
+  #messages { flex: 1; overflow-y: auto; padding: 20px; }
+  .inner { max-width: 860px; margin: 0 auto; }
+  .msg { display: flex; gap: 12px; margin-bottom: 18px; }
+  .avatar {
+    flex: none; width: 32px; height: 32px; border-radius: 8px;
+    display: grid; place-items: center; font-weight: 700; font-size: 13px;
+  }
+  .msg.claude .avatar { background: var(--claude-soft); color: var(--claude); }
+  .msg.human .avatar { background: var(--you-soft); color: var(--you); }
+  .msg.local .avatar { background: var(--local-soft); color: var(--local); }
+  .bubble { min-width: 0; flex: 1; }
+  .who { font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .msg.claude .who .n { color: var(--claude); }
+  .msg.human .who .n { color: var(--you); }
+  .msg.local .who .n { color: var(--local); }
+  .who time, .who .model { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .content { overflow-wrap: anywhere; }
+  .content p { margin: 4px 0 8px; }
+  .content ul, .content ol { margin: 4px 0 8px; padding-left: 22px; }
+  .content code { font-family: var(--mono); font-size: 12.5px; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  .content h3 { font-size: 14px; margin: 12px 0 4px; }
+  .codeblock { position: relative; margin: 8px 0; }
+  .codeblock pre {
+    margin: 0; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.45;
+  }
+  .codeblock pre code { background: none; padding: 0; }
+  .codeblock .copy { position: absolute; top: 6px; right: 6px; font-size: 11px; padding: 2px 8px; opacity: .8; }
+  .pending .content { color: var(--muted); font-style: italic; }
+  .empty { text-align: center; color: var(--muted); margin-top: 18vh; }
+  .empty h2 { color: var(--text); font-size: 18px; margin-bottom: 6px; }
+  .error { color: var(--bad); }
+
+  .composer { border-top: 1px solid var(--border); background: var(--panel); padding: 12px 20px 16px; }
+  .composer .inner { display: flex; gap: 10px; align-items: flex-end; }
+  textarea {
+    flex: 1; resize: none; min-height: 44px; max-height: 220px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+  .hint { font-size: 12px; color: var(--muted); max-width: 860px; margin: 6px auto 0; }
+
+  /* Status dialog */
+  dialog {
+    border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text);
+    width: min(640px, calc(100vw - 32px)); padding: 0;
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, .35); }
+  .dlg-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .dlg-head h2 { margin: 0; font-size: 16px; }
+  .dlg-body { padding: 8px 18px 18px; max-height: 70vh; overflow-y: auto; }
+  .check { display: grid; grid-template-columns: 20px 1fr; gap: 4px 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .check:last-child { border-bottom: none; }
+  .check .icon { font-weight: 700; }
+  .check .icon.ok { color: var(--ok); }
+  .check .icon.bad { color: var(--warn); }
+  .check .detail { color: var(--muted); font-size: 13px; }
+  .check .fix { grid-column: 2; font-family: var(--mono); font-size: 12px; background: var(--code-bg); padding: 4px 8px; border-radius: 6px; }
+  .cfg { margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .cfg code { font-family: var(--mono); color: var(--text); }
+
+  /* Projects header + per-project actions */
+  .section-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 6px 16px; }
+  .section-row .section-label { padding: 0; }
+  .add-btn { padding: 3px 10px; font-size: 13px; }
+  .tag.missing { background: transparent; color: var(--warn); border: 1px solid var(--warn); }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .actions button { padding: 4px 10px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+  .actions button:disabled { opacity: .45; cursor: default; }
+  .actions .sep { flex: 1; }
+  .ico { width: 14px; height: 14px; flex: none; }
+
+  /* Terminal-style "Add project" dialog */
+  .term {
+    margin: 14px 18px 0; border-radius: 10px; background: #111110; color: #e6e6e1;
+    font-family: var(--mono); font-size: 13px; border: 1px solid #2c2c29; overflow: hidden;
+  }
+  .term-line { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #2c2c29; }
+  .term-line .prompt { color: #69c27d; white-space: nowrap; user-select: none; }
+  .term-line input {
+    flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: inherit; font: inherit; caret-color: #69c27d;
+  }
+  .term-out { padding: 8px 12px 10px; max-height: 240px; overflow-y: auto; line-height: 1.6; }
+  .term-out .ok { color: #69c27d; }
+  .term-out .err { color: #ff7b7b; }
+  .term-out .muted { color: #8a8a84; }
+  .term-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 12px; margin-top: 4px; }
+  .term-grid button {
+    all: unset; cursor: pointer; color: #7c9bff; padding: 0 4px; border-radius: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .term-grid button:hover, .term-grid button.sel { background: #2a3352; color: #fff; }
+  .add-actions { display: flex; align-items: center; gap: 10px; padding: 12px 18px; flex-wrap: wrap; }
+  .add-actions .grow { flex: 1; font-size: 12px; color: var(--muted); }
+  kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+  #suggestions { padding: 0 10px 14px; }
+  #suggestions .project .meta { font-family: var(--mono); }
+  .add-dlg .section-label { padding: 4px 18px 6px; }
+
+  /* Settings summary + panel */
+  .summary {
+    all: unset; cursor: pointer; display: block; margin-top: 8px; font-size: 12px; color: var(--muted);
+    border-radius: 6px; padding: 2px 4px; margin-left: -4px;
+  }
+  .summary:hover, .summary:focus-visible { background: var(--accent-soft); color: var(--text); }
+  .summary b { color: var(--text); font-weight: 600; }
+  .summary .dot-sep { margin: 0 6px; opacity: .5; }
+  .settings-dlg { width: min(560px, calc(100vw - 32px)); }
+  .settings-dlg section { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .settings-dlg section:last-child { border-bottom: none; }
+  .settings-dlg h3 { margin: 0 0 10px; font-size: 14px; }
+  .settings-dlg h3 span { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .field { display: grid; grid-template-columns: 90px 1fr; gap: 4px 12px; align-items: center; margin-bottom: 10px; }
+  .field select { max-width: none; width: 100%; }
+  .field small { grid-column: 2; }
+  .settings-dlg small { display: block; color: var(--muted); font-size: 12px; line-height: 1.4; }
+  .settings-dlg .check-line { margin-bottom: 10px; }
+  .settings-dlg .check-line small { margin-top: 2px; }
+  .settings-dlg small.warn { color: var(--warn); }
+  @media (max-width: 520px) { .field { grid-template-columns: 1fr; } .field small { grid-column: 1; } }
+  .plan-toggle {
+    display: flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--border);
+    border-radius: var(--radius); cursor: pointer; user-select: none; color: var(--muted); font-size: 13px;
+  }
+  .plan-toggle input { margin: 0; accent-color: var(--accent); }
+  .plan-toggle:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .badge-plan {
+    font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    padding: 1px 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent);
+  }
+
+  /* Send-to switch + routing chips */
+  .target { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; flex: none; }
+  .target button { border: none; border-radius: 0; padding: 8px 11px; background: transparent; color: var(--muted); font-size: 13px; }
+  .target button + button { border-left: 1px solid var(--border); }
+  .target button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .route-chip { font-size: 11px; color: var(--muted); display: inline-flex; gap: 4px; align-items: center; }
+  .route-chip b { font-weight: 600; }
+  .route-chip.to-claude b { color: var(--claude); }
+  .route-chip.to-local b { color: var(--local); }
+  .content.error, .msg.err .content { color: var(--bad); }
+  /* Composer: message box on its own row, controls underneath */
+  .composer .inner { flex-wrap: wrap; align-items: center; }
+  .composer textarea { flex: 1 1 100%; }
+  .composer #sendBtn { margin-left: auto; padding: 8px 18px; }
+
+  /* Deleting projects */
+  .project-row { position: relative; }
+  .project-row .project { padding-right: 36px; }
+  .row-del {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    width: 28px; height: 28px; padding: 0; display: grid; place-items: center;
+    background: transparent; border-color: transparent; color: var(--muted); opacity: 0;
+  }
+  .project-row:hover .row-del, .row-del:focus-visible { opacity: 1; }
+  .row-del:hover { color: var(--bad); border-color: var(--border); background: var(--panel); }
+  @media (hover: none) { .row-del { opacity: .7; } }
+  .no-projects { padding: 8px 10px; color: var(--muted); font-size: 13px; }
+  button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+  button.danger:disabled { opacity: .6; }
+  button.danger-text:hover { color: var(--bad); }
+  .del-dlg { width: min(520px, calc(100vw - 32px)); }
+  .del-dlg .dlg-body { padding-top: 12px; }
+  .del-dlg .path { font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
+  .check-line { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .check-line input { margin-top: 3px; }
+  .check-line input:disabled + span { color: var(--muted); }
+
+  /* Usage panel */
+  .usage-dlg { width: min(760px, calc(100vw - 32px)); }
+  .usage-dlg .dlg-head { gap: 12px; flex-wrap: wrap; }
+  .usage-dlg .dlg-head h2 { flex: 1; }
+  .range { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .range button { border: none; border-radius: 0; padding: 4px 10px; font-size: 12px; background: transparent; color: var(--muted); }
+  .range button + button { border-left: 1px solid var(--border); }
+  .range button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .usage-dlg h3 { font-size: 14px; margin: 18px 0 4px; }
+  .usage-dlg h3 small { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 10px 0; }
+  .tile { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+  .tile .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .tile .l { font-size: 12px; color: var(--muted); }
+  .bars { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 120px; padding-top: 6px;
+    border-bottom: 1px solid var(--border); }
+  .bars .b { flex: 1; min-width: 4px; background: var(--accent); border-radius: 4px 4px 0 0; position: relative; cursor: default; }
+  .bars .b.zero { background: var(--border); height: 1px !important; border-radius: 0; }
+  .bars .hit { position: absolute; inset: -6px -1px 0; }
+  .bars .b:hover { filter: brightness(1.15); }
+  .bar-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .chart-tip {
+    position: fixed; pointer-events: none; z-index: 20; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+  table.ulist { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+  table.ulist td { padding: 5px 4px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  table.ulist td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
+  table.ulist td.name { max-width: 0; width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.ulist .ibar { height: 6px; border-radius: 3px; background: var(--accent); min-width: 2px; }
+  .muted-note { color: var(--muted); font-size: 12px; margin-top: 8px; line-height: 1.5; }
+  .usage-meta { font-size: 11px; color: var(--muted); margin-left: 8px; font-weight: 400; opacity: 0; transition: opacity .15s; }
+  .msg:hover .usage-meta { opacity: 1; }
+
+  /* Hover actions, drop target, shortcuts */
+  .msg { position: relative; }
+  .msg-actions { position: absolute; top: -4px; right: 0; display: none; gap: 4px; }
+  .msg:hover .msg-actions, .msg:focus-within .msg-actions { display: flex; }
+  .msg-actions button { padding: 2px 8px; font-size: 11px; background: var(--panel); box-shadow: var(--shadow); }
+  @media (hover: none) { .msg-actions { position: static; display: flex; margin-top: 4px; order: 3; } }
+  .composer.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
+  .linkish { all: unset; cursor: pointer; color: var(--accent); margin-left: 6px; }
+  .linkish:hover { text-decoration: underline; }
+  .keys-dlg { width: min(600px, calc(100vw - 32px)); }
+  .keys-dlg h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  table.keys { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.keys td { padding: 6px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.keys td:first-child { white-space: nowrap; width: 1%; padding-right: 14px; }
+
+  /* Project files read + implement button */
+  details.ctx { margin-top: 6px; font-size: 12px; color: var(--muted); }
+  details.ctx summary { cursor: pointer; width: fit-content; }
+  details.ctx ul { margin: 4px 0 0; padding-left: 18px; }
+  details.ctx li { margin: 2px 0; }
+  .msg-actions button.impl { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* Toast */
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px;
+    transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100vw - 32px); z-index: 10;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.err { background: var(--bad); color: #fff; }
+
+  /* Narrow screens: sidebar becomes a top strip */
+  @media (max-width: 760px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    aside { border-right: none; border-bottom: 1px solid var(--border); max-height: 34vh; }
+    .brand { padding: 10px 16px 4px; }
+    #messages, header, .composer { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand"><span class="logo"></span>ollama-bridge</div>
+  <div class="section-row">
+    <div class="section-label">Projects</div>
+    <button class="add-btn" id="addProjectBtn" title="Add a project folder">+ Add</button>
+  </div>
+  <div id="projects"></div>
+  <button class="status-btn" id="usageBtn" title="Claude Code and local model usage (Ctrl+U)">
+    <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 13.5h11M4 11V8M7 11V4.5M10 11V6.5M13 11V3"/></svg>
+    <span id="usageText">Usage</span></button>
+  <button class="status-btn" id="statusBtn"><span class="dot" id="statusDot"></span><span id="statusText">Checking setup…</span></button>
+</aside>
+
+<main>
+  <header>
+    <div class="title">
+      <h1 id="projName">…</h1>
+      <div class="path" id="projPath"></div>
+      <div class="actions" id="actions">
+        <button data-launch="claude" title="Open Claude Code in this folder, in a new terminal window">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 4l4 4-4 4M8.5 12H13"/></svg>Claude</button>
+        <button data-launch="local" title="Open Claude Code on your local model in this folder">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="3" width="11" height="8" rx="1.5"/><path d="M5.5 14h5M8 11v3"/></svg>Claude (local)</button>
+        <button data-launch="terminal" title="Open a terminal in this folder">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6.5l2 1.5-2 1.5M8 10h3"/></svg>Terminal</button>
+        <button data-launch="folder" title="Open this folder in your file manager">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 4.5a1 1 0 011-1h3.5l1.5 1.5h6a1 1 0 011 1v6a1 1 0 01-1 1h-11a1 1 0 01-1-1z"/></svg>Folder</button>
+        <span class="sep"></span>
+        <button id="settingsBtn" title="Choose models, effort, fast mode and how Claude starts">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h9M14 12h0"/><circle cx="10.5" cy="4" r="1.5"/><circle cx="5.5" cy="8" r="1.5"/><circle cx="12.5" cy="12" r="1.5"/></svg>Settings</button>
+        <button class="ghost" id="clearBtn" title="Clear this project's shared conversation">Clear</button>
+        <button class="ghost danger-text" id="removeBtn" title="Delete this project from the list">Delete</button>
+      </div>
+      <button class="summary" id="summary" title="Change settings"></button>
+    </div>
+  </header>
+
+  <div id="messages"><div class="inner" id="list"></div></div>
+
+  <div class="composer">
+    <div class="inner">
+      <textarea id="input" rows="1" placeholder="Message the local model…"></textarea>
+      <div class="target" role="radiogroup" aria-label="Send to">
+        <button type="button" data-target="local" title="Always use the local model selected at the top">Local</button>
+        <button type="button" data-target="smart" title="Smart prompt: picks the local model for simple, self-contained requests and Claude Code for anything that needs your project's files or careful work">Smart</button>
+        <button type="button" data-target="claude" title="Always use Claude Code (model and start mode from the settings above)">Claude</button>
+      </div>
+      <label class="plan-toggle" title="Plan mode: the reply is a step-by-step plan instead of doing the task">
+        <input type="checkbox" id="planMode"><span>Plan</span></label>
+      <button class="primary" id="sendBtn">Send</button>
+    </div>
+    <div class="hint">Enter to send, Shift+Enter for a new line. Claude sees this conversation through <code>local_history</code>.
+      <button class="linkish" id="keysBtn" title="Shortcuts and tricks (?)">Shortcuts &amp; tricks</button></div>
+  </div>
+</main>
+
+<dialog id="addDlg" class="add-dlg">
+  <div class="dlg-head"><h2>Add a project</h2><button class="ghost" id="closeAdd">Close</button></div>
+  <div class="term">
+    <div class="term-line"><span class="prompt">$ cd</span><input id="pathInput" spellcheck="false" autocomplete="off" aria-label="Folder path"></div>
+    <div class="term-out" id="termOut"></div>
+  </div>
+  <div class="add-actions">
+    <button id="browseBtn">Browse…</button>
+    <span class="grow"><kbd>Tab</kbd> completes · <kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>Enter</kbd> adds</span>
+    <button class="primary" id="addBtn">Add project</button>
+  </div>
+  <div id="suggestWrap" hidden>
+    <div class="section-label">Recent Claude Code folders</div>
+    <div id="suggestions"></div>
+  </div>
+</dialog>
+
+<dialog id="keysDlg" class="keys-dlg">
+  <div class="dlg-head"><h2>Shortcuts &amp; tricks</h2><button class="ghost" id="closeKeys">Close</button></div>
+  <div class="dlg-body">
+    <h3>In a message</h3>
+    <table class="keys">
+      <tr><td><code>@claude</code> <code>@local</code> <code>@smart</code></td><td>send just this message there, whatever the switch says</td></tr>
+      <tr><td><code>@reason</code></td><td>ask the reasoning model (DeepSeek R1 unless you changed it) for this message</td></tr>
+      <tr><td><code>@qwen3.6</code>, <code>@deepseek</code>…</td><td>use any installed model by name (the start of the name is enough)</td></tr>
+      <tr><td><code>/plan</code></td><td>plan mode for this message only; combine them: <code>@claude /plan add login</code></td></tr>
+      <tr><td>Drop files on the box</td><td>pastes text files in as code blocks, so the local model can see them</td></tr>
+      <tr><td><kbd>↑</kbd> in an empty box</td><td>brings back your last message, like a terminal</td></tr>
+      <tr><td>Hover a message</td><td><b>Copy</b>, <b>Ask Claude instead</b> / <b>Retry locally</b>, <b>Second opinion</b>; hover also shows tokens and time</td></tr>
+    </table>
+    <h3>Keys</h3>
+    <table class="keys">
+      <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd> or <kbd>/</kbd></td><td>jump to the message box</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>send to Local / Smart / Claude</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>P</kbd></td><td>plan mode on/off</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>S</kbd></td><td>settings</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>U</kbd></td><td>usage</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>N</kbd></td><td>add a project</td></tr>
+      <tr><td><kbd>?</kbd></td><td>this list</td></tr>
+    </table>
+  </div>
+</dialog>
+
+<dialog id="usageDlg" class="usage-dlg">
+  <div class="dlg-head">
+    <h2>Usage</h2>
+    <div class="range" role="tablist" aria-label="Time range">
+      <button data-range="5h">5 hours</button><button data-range="today">Today</button><button data-range="7d">7 days</button><button data-range="30d">30 days</button>
+    </div>
+    <button class="ghost" id="closeUsage">Close</button>
+  </div>
+  <div class="dlg-body" id="usageBody"><div class="muted-note">Loading…</div></div>
+</dialog>
+
+<dialog id="settingsDlg" class="settings-dlg">
+  <div class="dlg-head"><h2>Settings</h2><button class="primary" id="settingsDone">Done</button></div>
+  <div class="dlg-body">
+    <section>
+      <h3>Local model <span>answers in this chat (Local, and Smart when it stays local)</span></h3>
+      <div class="field"><label for="model">Model</label><select id="model"></select></div>
+      <div class="field"><label for="projectFiles">Project files</label><select id="projectFiles">
+          <option value="plans">Read the project for plans</option>
+          <option value="always">Read the project for every message</option>
+          <option value="off">Off</option></select>
+        <small>The bridge finds relevant code on this PC (outline, the model's picks, search by meaning) and attaches it, so plans use real names. No Claude tokens.</small></div>
+      <label class="check-line"><input type="checkbox" id="useHistory" checked>
+        <span>Shared history <small>send the project's conversation so the model remembers it</small></span></label>
+    </section>
+    <section>
+      <h3>Claude Code <span>the Claude button, and Claude / Smart in this chat</span></h3>
+      <div class="field"><label for="claudeModel">Model</label><select id="claudeModel"></select></div>
+      <div class="field"><label for="effort">Effort</label><select id="effort"></select>
+        <small>Higher effort thinks longer: better on hard tasks, slower and uses more.</small></div>
+      <label class="check-line"><input type="checkbox" id="fastMode">
+        <span>Fast mode <small id="fastNote">Up to 2.5× faster Opus at a higher price. Opus only (other models switch to Opus);
+        billed to usage credits, not your plan's limits.</small></span></label>
+      <div class="field"><label for="startMode">Starts in</label><select id="startMode"></select>
+        <small>From this chat, Normal means Claude can read files but not change them; pick Auto-accept edits to let it edit.</small></div>
+    </section>
+    <section>
+      <h3>Claude Code on a local model <span>the Claude (local) button</span></h3>
+      <div class="field"><label for="localModel">Model</label><select id="localModel"></select>
+        <small>Only models that make real tool calls can run Claude Code; others are greyed out.</small></div>
+    </section>
+  </div>
+</dialog>
+
+<dialog id="delDlg" class="del-dlg">
+  <div class="dlg-head"><h2>Delete <span id="delName"></span>?</h2></div>
+  <div class="dlg-body">
+    <div class="path" id="delPath"></div>
+    <p>It will be removed from your project list. <strong>The folder and its files on disk are not touched</strong>,
+      and you can add it again any time.</p>
+    <label class="check-line"><input type="checkbox" id="delHistory"> <span id="delHistoryLabel"></span></label>
+  </div>
+  <div class="add-actions">
+    <span class="grow"></span>
+    <button id="delCancel">Cancel</button>
+    <button class="danger" id="delConfirm">Delete project</button>
+  </div>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<dialog id="statusDlg">
+  <div class="dlg-head"><h2>Setup status</h2><button class="ghost" id="closeDlg">Close</button></div>
+  <div class="dlg-body" id="statusBody"></div>
+</dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { projects: [], project: null, config: null, messages: [], sending: false, lastCount: -1 };
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+async function api(path, body) {
+  const res = await fetch(path, body
+    ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+    : undefined);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// ---- tiny markdown renderer (escape first, then fenced code, inline code, bold, headings, lists)
+const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function inline(s) {
+  return s
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+}
+function renderText(text) {
+  const out = [];
+  for (const block of text.split(/\n{2,}/)) {
+    const lines = block.split("\n");
+    if (lines.every((l) => /^\s*([-*]|\d+\.)\s+/.test(l))) {
+      const ordered = /^\s*\d+\./.test(lines[0]);
+      const items = lines.map((l) => `<li>${inline(l.replace(/^\s*([-*]|\d+\.)\s+/, ""))}</li>`).join("");
+      out.push(ordered ? `<ol>${items}</ol>` : `<ul>${items}</ul>`);
+    } else if (/^#{1,6}\s/.test(lines[0]) && lines.length === 1) {
+      out.push(`<h3>${inline(lines[0].replace(/^#+\s/, ""))}</h3>`);
+    } else if (block.trim()) {
+      out.push(`<p>${lines.map(inline).join("<br>")}</p>`);
+    }
+  }
+  return out.join("");
+}
+function renderMarkdown(src) {
+  const parts = esc(src).split(/```[^\n]*\n([\s\S]*?)```/g);
+  return parts.map((p, i) => i % 2
+    ? `<div class="codeblock"><button class="copy">Copy</button><pre><code>${p.replace(/\n$/, "")}</code></pre></div>`
+    : renderText(p)).join("");
+}
+
+// ---- rendering
+const basename = (p) => p.split(/[\\/]/).filter(Boolean).pop() || p;
+function relTime(ts) {
+  if (!ts) return "no messages yet";
+  const s = (Date.now() - new Date(ts)) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+const TRASH = `<svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+  <path d="M2.5 4.5h11M6.5 4.5V3a1 1 0 011-1h1a1 1 0 011 1v1.5M4 4.5l.7 8.6a1 1 0 001 .9h4.6a1 1 0 001-.9l.7-8.6M6.8 7v4.5M9.2 7v4.5"/></svg>`;
+
+function renderProjects() {
+  if (!state.projects.length) {
+    $("projects").innerHTML = `<div class="no-projects">No projects yet. Click <strong>+ Add</strong> to add a folder.</div>`;
+    return;
+  }
+  $("projects").innerHTML = state.projects.map((p, i) => `
+    <div class="project-row">
+      <button class="project ${p.project === state.project ? "active" : ""}" data-i="${i}" title="${esc(p.project)}">
+        <div class="name">${esc(basename(p.project))}${p.current ? '<span class="tag">here</span>' : ""}${p.exists ? "" : '<span class="tag missing">missing</span>'}</div>
+        <div class="meta">${p.messages} message${p.messages === 1 ? "" : "s"} · ${relTime(p.updated)}</div>
+      </button>
+      <button class="row-del" data-del="${i}" title="Delete ${esc(basename(p.project))}" aria-label="Delete ${esc(basename(p.project))}">${TRASH}</button>
+    </div>`).join("");
+}
+
+// Compact numbers: 1234 -> 1.2k, 2500000 -> 2.5M
+const fmt = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n || 0));
+// Shown when hovering a reply: tokens in -> out, time, and Claude Code's reported cost.
+function usageMeta(m) {
+  const u = m.usage;
+  if (!u) return "";
+  const bits = [`${fmt((u.in || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0))} → ${fmt(u.out || 0)} tokens`];
+  if (u.ms) bits.push(`${(u.ms / 1000).toFixed(1)}s`);
+  if (u.turns > 1) bits.push(`${u.turns} turns`);
+  if (u.costUsd) bits.push(`~$${u.costUsd.toFixed(u.costUsd < 0.1 ? 3 : 2)}`);
+  return `<span class="usage-meta">${bits.join(" · ")}</span>`;
+}
+
+// "Read 6 parts of the project": what the bridge attached for the local model, and why.
+function contextList(m) {
+  if (!m.context?.length) return "";
+  const files = new Set(m.context.map((c) => c.path)).size;
+  return `<details class="ctx"><summary>Read ${m.context.length} part${m.context.length === 1 ? "" : "s"} of the project (${files} file${files === 1 ? "" : "s"})</summary><ul>${
+    m.context.map((c) => `<li><code>${esc(c.path)}${c.lines ? `:${esc(c.lines)}` : ""}</code> ${esc(c.why)}</li>`).join("")}</ul></details>`;
+}
+
+function msgHtml(m, i) {
+  const kind = m.from === "claude" ? "claude" : m.from === "human" ? "human" : "local";
+  const name = kind === "claude" ? "Claude" : kind === "human" ? "You" : "Local model";
+  const letter = kind === "claude" ? "C" : kind === "human" ? "Y" : "L";
+  const time = m.ts ? `<time>${new Date(m.ts).toLocaleString()}</time>` : "";
+  const model = (m.model ? `<span class="model">${esc(m.model)}</span>` : "") + (m.mode === "plan" ? '<span class="badge-plan">Plan</span>' : "");
+  const route = m.route ? `<span class="route-chip to-${m.route.to}" title="${esc(m.route.by === "you" ? "Chosen by you" : m.route.by === "rules" ? "Decided by a rule" : "Decided by the local classifier")}">${m.route.by === "you" ? "→" : "Smart →"} <b>${m.route.to === "claude" ? "Claude" : "Local"}</b> · ${esc(m.route.reason)}</span>` : "";
+  const acts = m.pending ? "" : `<div class="msg-actions">
+      <button data-act="copy" title="Copy this message">Copy</button>
+      ${kind === "local" && m.mode === "plan" ? `<button class="impl" data-act="implement" title="Send this plan to Claude Code to carry out, editing files (Auto-accept edits)">Implement with Claude</button>` : ""}
+      ${kind !== "human" ? `<button data-act="${kind === "claude" ? "local" : "claude"}" title="Send the same prompt to ${kind === "claude" ? "the local model" : "Claude Code"}">${kind === "claude" ? "Retry locally" : "Ask Claude instead"}</button>
+      <button data-act="second" title="Ask the reasoning model to check this answer">Second opinion</button>` : ""}
+    </div>`;
+  return `<div class="msg ${kind} ${m.pending ? "pending" : ""} ${m.error ? "err" : ""}" data-i="${i}">${acts}
+    <div class="avatar">${letter}</div>
+    <div class="bubble"><div class="who"><span class="n">${name}</span>${model}${time}${route}${usageMeta(m)}</div>
+    <div class="content">${m.pending ? esc(m.content) : renderMarkdown(m.content)}</div>${contextList(m)}</div></div>`;
+}
+
+function renderMessages(scroll) {
+  const box = $("messages");
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  if (!state.messages.length) {
+    $("list").innerHTML = `<div class="empty"><h2>No conversation yet</h2>
+      Send a message below, or ask Claude to use <code>ask_local</code> in this project.<br>
+      Everything here is shared between you, Claude and your local models.</div>`;
+    return;
+  }
+  $("list").innerHTML = state.messages.map(msgHtml).join("");
+  if (scroll || nearBottom) box.scrollTop = box.scrollHeight;
+}
+
+function renderHeader() {
+  $("projName").textContent = state.project ? basename(state.project) : "No project";
+  $("projPath").textContent = state.project || "";
+  const p = state.projects.find((x) => x.project === state.project);
+  for (const b of document.querySelectorAll("[data-launch]")) {
+    b.disabled = !p?.exists;
+    if (p && !p.exists) b.title = "This folder no longer exists";
+  }
+  $("removeBtn").hidden = !p;
+}
+
+let toastTimer;
+function toast(msg, isErr = false) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = `show${isErr ? " err" : ""}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.className = ""), isErr ? 5000 : 2500);
+}
+
+// ---- project actions
+const LAUNCH_LABEL = { claude: "Claude Code", local: "Claude Code (local model)", terminal: "a terminal", folder: "the folder" };
+async function launch(what) {
+  if (!state.project) return;
+  try {
+    const o = claudeOpts();
+    const body = what === "claude" ? o : what === "local" ? { model: $("localModel").value, mode: o.mode } : {};
+    await api("/api/launch", { project: state.project, what, ...body });
+    const name = (id) => $(id).selectedOptions[0].textContent.replace(/ · .*/, "").replace(/ \(.*/, "");
+    const detail = what === "claude"
+      ? [o.model && name("claudeModel"), o.effort && `${name("effort").toLowerCase()} effort`, o.fast && "fast", o.mode && name("startMode")]
+      : what === "local" ? [body.model && name("localModel"), o.mode && name("startMode")] : [];
+    const detailText = detail.filter(Boolean).join(", ");
+    toast(`Opened ${LAUNCH_LABEL[what]} in ${basename(state.project)}${detailText ? ` (${detailText})` : ""}`);
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---- delete a project (the folder on disk is never touched)
+let deleting = null;
+function openDelete(p) {
+  if (!p) return;
+  deleting = p;
+  $("delName").textContent = basename(p.project);
+  $("delPath").textContent = p.project;
+  const box = $("delHistory");
+  box.checked = p.messages > 0;
+  box.disabled = p.messages === 0;
+  $("delHistoryLabel").textContent = p.messages
+    ? `Also delete its shared conversation (${p.messages} message${p.messages === 1 ? "" : "s"})`
+    : "It has no shared conversation to delete";
+  $("delDlg").showModal();
+  $("delConfirm").focus();
+}
+
+async function confirmDelete() {
+  const p = deleting;
+  if (!p) return;
+  const deleteHistory = $("delHistory").checked;
+  $("delConfirm").disabled = true;
+  try {
+    await api("/api/projects/remove", { project: p.project, deleteHistory });
+    $("delDlg").close();
+    if (state.project === p.project) {
+      state.project = null;
+      store.set("project", "");
+    }
+    await loadProjects();
+    state.lastCount = -1;
+    loadHistory(true);
+    toast(`Deleted ${basename(p.project)}${deleteHistory ? " and its conversation" : ""}`);
+  } catch (e) { toast(e.message, true); }
+  finally { $("delConfirm").disabled = false; }
+}
+
+// ---- "Add project": a little terminal with folder completion
+const term = { matches: [], sel: -1, resolved: "", exists: false, seq: 0 };
+const sep = () => (navigator.userAgent.includes("Windows") ? "\\" : "/");
+
+async function refreshCompletion() {
+  const seq = ++term.seq;
+  const value = $("pathInput").value;
+  let r;
+  try { r = await api(`/api/complete?path=${encodeURIComponent(value)}`); } catch (e) { return; }
+  if (seq !== term.seq) return; // a newer keystroke already asked
+  term.matches = r.matches;
+  term.sel = -1;
+  term.resolved = r.resolved;
+  term.exists = r.exists;
+  renderTerm();
+}
+
+function renderTerm(error) {
+  const lines = [];
+  if (error) lines.push(`<div class="err">${esc(error)}</div>`);
+  else if (!$("pathInput").value.trim()) lines.push(`<div class="muted">Type a folder path, or press Tab to list folders.</div>`);
+  else if (term.exists) lines.push(`<div class="ok">✓ ${esc(term.resolved)}</div>`);
+  else lines.push(`<div class="muted">No folder called ${esc(term.resolved)} yet${term.matches.length ? ", keep typing or press Tab" : ""}</div>`);
+  if (term.matches.length) {
+    lines.push(`<div class="term-grid">${term.matches.map((m, i) =>
+      `<button type="button" data-i="${i}" class="${i === term.sel ? "sel" : ""}" title="${esc(m)}">${esc(basename(m))}${sep()}</button>`).join("")}</div>`);
+  }
+  $("termOut").innerHTML = lines.join("");
+  $("termOut").querySelector(".sel")?.scrollIntoView({ block: "nearest" });
+}
+
+function setPath(value) {
+  const input = $("pathInput");
+  input.value = value;
+  input.focus();
+  input.setSelectionRange(value.length, value.length);
+  refreshCompletion();
+}
+
+function commonPrefix(list) {
+  if (!list.length) return "";
+  let prefix = list[0];
+  for (const s of list.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < s.length && prefix[i].toLowerCase() === s[i].toLowerCase()) i++;
+    prefix = prefix.slice(0, i);
+  }
+  return prefix;
+}
+
+function tabComplete() {
+  if (term.sel >= 0) return setPath(term.matches[term.sel]);
+  if (term.matches.length === 1) return setPath(term.matches[0]);
+  const prefix = commonPrefix(term.matches);
+  if (prefix && prefix.length > $("pathInput").value.length) setPath(prefix);
+}
+
+async function addPath(value) {
+  const path = (value ?? $("pathInput").value).trim();
+  if (!path) return renderTerm("Type a folder path first.");
+  try {
+    const { project } = await api("/api/projects/add", { path });
+    $("addDlg").close();
+    state.project = project;
+    store.set("project", project);
+    await loadProjects();
+    state.lastCount = -1;
+    loadHistory(true);
+    toast(`Added ${basename(project)}`);
+  } catch (e) { renderTerm(e.message); }
+}
+
+async function browse() {
+  const btn = $("browseBtn");
+  btn.disabled = true;
+  btn.textContent = "Choose a folder in the window that opened…";
+  try {
+    const { path } = await api("/api/pick-folder", {});
+    if (path) setPath(path);
+  } catch (e) { renderTerm(e.message); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = "Browse…";
+  }
+}
+
+async function openAdd() {
+  const current = state.projects.find((p) => p.current)?.project;
+  // Start one level up from the current project, like being in a terminal next to your other projects.
+  const start = current ? current.replace(/[\\/][^\\/]+[\\/]?$/, "") + sep() : "~" + sep();
+  $("addDlg").showModal();
+  setPath(start);
+  try {
+    const sugg = await api("/api/suggestions");
+    $("suggestWrap").hidden = !sugg.length;
+    $("suggestions").innerHTML = sugg.map((p) => `
+      <button class="project" data-path="${esc(p)}"><div class="name">${esc(basename(p))}</div><div class="meta">${esc(p)}</div></button>`).join("");
+  } catch { $("suggestWrap").hidden = true; }
+}
+
+// ---- data loading
+async function loadProjects() {
+  state.projects = await api("/api/projects");
+  if (!state.project) {
+    const saved = store.get("project");
+    const pick = state.projects.find((p) => p.project === saved) || state.projects.find((p) => p.current) || state.projects[0];
+    state.project = pick?.project || null;
+  }
+  renderProjects();
+  renderHeader();
+}
+
+async function loadHistory(scroll = false) {
+  if (!state.project || state.sending) return;
+  const log = await api(`/api/history?project=${encodeURIComponent(state.project)}`);
+  if (log.messages.length === state.lastCount && !scroll) return;
+  state.lastCount = log.messages.length;
+  state.messages = log.messages;
+  if (!state.lastSent) state.lastSent = [...log.messages].reverse().find((m) => m.from === "human")?.content || "";
+  renderMessages(scroll);
+}
+
+// "qwen2.5-coder:14b" -> "Qwen 2.5 Coder 14B", "deepseek-r1:14b" -> "DeepSeek R1 14B", "qwen3.6-cc" -> "Qwen 3.6 (long context)"
+const BRANDS = { qwen: "Qwen", deepseek: "DeepSeek", llama: "Llama", mistral: "Mistral", gemma: "Gemma", phi: "Phi", codellama: "Code Llama" };
+function prettyModel(name) {
+  let [base, tag = ""] = name.split(":");
+  if (tag === "latest") tag = "";
+  const longCtx = /-cc$/.test(base);
+  base = base.replace(/-cc$/, "");
+  const words = base.split(/[-_]/).flatMap((w) => {
+    const m = w.match(/^([a-z]+)(\d[\d.]*)$/i); // qwen2.5 -> qwen 2.5
+    return m && BRANDS[m[1].toLowerCase()] ? [m[1], m[2]] : [w];
+  }).map((w) => BRANDS[w.toLowerCase()] || (/^r\d+$/i.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)));
+  return `${words.join(" ")}${tag ? ` ${tag.toUpperCase()}` : ""}${longCtx ? " (long context)" : ""}`;
+}
+const ROLE_HINT = { default: "fast, default", reasoning: "reasoning", "claude-local": "tool calling" };
+const optionLabel = (m) => `${prettyModel(m.name)}${m.role ? ` · ${ROLE_HINT[m.role]}` : ""} · ${m.sizeGB} GB`;
+
+async function loadModels() {
+  const sel = $("model");
+  try {
+    const models = await api("/api/models");
+    const saved = store.get("model");
+    const def = models.find((m) => m.role === "default")?.name;
+    sel.innerHTML = models.map((m) => `<option value="${esc(m.name)}" title="${esc(m.name)}">${esc(optionLabel(m))}</option>`).join("");
+    sel.value = models.some((m) => m.name === saved) ? saved : def || models[0]?.name || "";
+
+    // Claude (local) needs a model that makes real tool calls; list those, the configured one first.
+    const local = $("localModel");
+    const usable = models.filter((m) => m.tools && !m.toolsUnreliable);
+    const configured = models.find((m) => m.role === "claude-local");
+    local.innerHTML = `<option value="">${esc(configured ? prettyModel(configured.name) : "From config")} · default</option>` +
+      usable.filter((m) => m !== configured).map((m) => `<option value="${esc(m.name)}" title="${esc(m.name)}">${esc(prettyModel(m.name))}</option>`).join("") +
+      models.filter((m) => !m.tools || m.toolsUnreliable).map((m) =>
+        `<option value="${esc(m.name)}" disabled>${esc(prettyModel(m.name))} · no reliable tool calls</option>`).join("");
+    const savedLocal = store.get("localModel");
+    if (usable.some((m) => m.name === savedLocal)) local.value = savedLocal;
+  } catch {
+    sel.innerHTML = `<option value="">Ollama not running</option>`;
+    $("localModel").innerHTML = `<option value="">Ollama not running</option>`;
+  }
+  renderSummary();
+}
+
+async function loadLaunchOptions() {
+  const { claudeModels, startModes, effortLevels } = await api("/api/launch-options");
+  const fill = (id, opts) => {
+    $(id).innerHTML = Object.entries(opts).map(([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join("");
+    const saved = store.get(id);
+    if (saved !== null && saved in opts) $(id).value = saved;
+  };
+  fill("claudeModel", claudeModels);
+  fill("effort", effortLevels);
+  fill("startMode", startModes);
+  $("fastMode").checked = store.get("fastMode") === "1";
+  renderSummary();
+}
+
+// Current Claude options, shared by the launch buttons and Claude / Smart in the chat.
+const claudeOpts = () => ({ model: $("claudeModel").value, effort: $("effort").value, fast: $("fastMode").checked, mode: $("startMode").value });
+
+// One readable line under the buttons: what each part will use. Click it to change.
+function renderSummary() {
+  const text = (id) => $(id).selectedOptions[0]?.textContent || "";
+  const chatModel = $("model").value ? prettyModel($("model").value) : "no local model";
+  const o = claudeOpts();
+  const claudeBits = [`<b>${esc(o.model ? text("claudeModel") : "Default model")}</b>`];
+  if (o.effort) claudeBits.push(`${esc(text("effort").toLowerCase())} effort`);
+  if (o.fast) claudeBits.push("fast");
+  if (o.mode) claudeBits.push(`starts in ${esc(text("startMode").replace(/ \(.*/, "").toLowerCase())}`);
+  const localRun = esc(text("localModel").replace(/ · .*/, "") || "default");
+  const sep = '<span class="dot-sep">·</span>';
+  $("summary").innerHTML = `Chat: <b>${esc(chatModel)}</b>${$("useHistory").checked ? "" : " (no history)"}${sep}Claude: ${claudeBits.join(", ")}${sep}Claude (local): <b>${localRun}</b>`;
+  // Fast mode only exists on Opus; say so when another model is picked.
+  $("fastNote").classList.toggle("warn", o.fast && !!o.model && o.model !== "opus");
+}
+
+async function loadStatus() {
+  try {
+    const s = await api("/api/status");
+    state.config = s.config;
+    const bad = s.checks.filter((c) => !c.ok).length;
+    $("statusDot").className = `dot ${bad ? "bad" : "ok"}`;
+    $("statusText").textContent = bad ? `${bad} setup issue${bad > 1 ? "s" : ""}` : "Setup OK";
+    $("statusBody").innerHTML = s.checks.map((c) => `
+      <div class="check"><span class="icon ${c.ok ? "ok" : "bad"}">${c.ok ? "✓" : "!"}</span>
+        <div><div>${esc(c.label)}</div><div class="detail">${esc(c.detail)}</div></div>
+        ${c.ok ? "" : `<div class="fix">${esc(c.fix)}</div>`}</div>`).join("") + `
+      <div class="cfg">Settings come from <code>${esc(s.configFile)}</code>. Edit it, then run
+        <code>ollama-bridge install</code> to download any new models.</div>`;
+  } catch (e) {
+    $("statusDot").className = "dot bad";
+    $("statusText").textContent = "Status unavailable";
+  }
+}
+
+// ---- actions
+// Send to: "local" (the model picked at the top), "claude" (Claude Code) or "smart" (the router decides).
+const getTarget = () => document.querySelector(".target .on")?.dataset.target || "smart";
+function setTarget(t) {
+  for (const b of document.querySelectorAll(".target button")) b.classList.toggle("on", b.dataset.target === t);
+  store.set("target", t);
+  $("model").title = t === "claude" ? "Not used when sending to Claude" : "Local model to reply";
+  $("input").placeholder = $("planMode").checked ? "Describe what you want planned…"
+    : t === "claude" ? "Ask Claude Code about this project…" : t === "smart" ? "Ask anything; Smart picks local or Claude…" : "Message the local model…";
+}
+
+// Hidden trick: start a message with @claude, @local, @smart, @reason (the reasoning model), @<model name>
+// and/or /plan to override the switch and model for that one message.
+function parsePrefixes(raw) {
+  let text = raw, target = null, model = null, plan = false, tag = null, m;
+  while ((m = text.match(/^\s*(@[\w.:\-\/]+|\/plan)\b\s*/i))) {
+    const tok = m[1].toLowerCase();
+    if (tok === "/plan") plan = true;
+    else if (tok === "@claude" || tok === "@local" || tok === "@smart") { target = tok.slice(1); tag = m[1]; }
+    else if (tok === "@reason" || tok === "@reasoning" || tok === "@deepseek") { target = "local"; model = state.config?.reasoningModel || "deepseek-r1:14b"; tag = m[1]; }
+    else {
+      const want = m[1].slice(1).toLowerCase();
+      const opts = [...$("model").options].map((o) => o.value);
+      const lc = (v) => v.toLowerCase();
+      // Exact name (with or without :latest) beats a partial match.
+      const opt = opts.find((v) => lc(v) === want || lc(v) === `${want}:latest`) || opts.find((v) => lc(v).startsWith(want));
+      if (!opt) break; // not a model: leave "@something" in the message
+      target = "local"; tag = m[1];
+      model = opt;
+    }
+    text = text.slice(m[0].length);
+  }
+  return { text: text.trim(), target, model, plan, tag };
+}
+
+// override: { text, target, model, plan } from retry buttons; otherwise read from the composer.
+async function sendMessage(override = {}) {
+  if (override instanceof Event) override = {};
+  const raw = (override.text ?? $("input").value).trim();
+  if (!raw || state.sending || !state.project) return;
+  const p = parsePrefixes(raw);
+  const text = p.text;
+  if (!text) return;
+  const target = override.target || p.target || getTarget();
+  const localModel = override.model || p.model || $("model").value;
+  const plan = override.plan ?? (p.plan || $("planMode").checked);
+  const useHistory = $("useHistory").checked;
+  state.sending = true;
+  state.lastSent = raw;
+  $("sendBtn").disabled = true;
+  if (override.text === undefined) $("input").value = "";
+  autosize();
+  const mine = { from: "human", content: override.logText || text, ts: new Date().toISOString(), ...(plan ? { mode: "plan" } : {}) };
+  // Project files: attach relevant code to local plans (or every local message), per Settings.
+  const pf = $("projectFiles").value;
+  const readProject = pf === "always" || (pf === "plans" && plan);
+  if (target !== "smart" && (p.tag || override.reason)) {
+    mine.route = { to: target === "claude" ? "claude" : "local", reason: p.tag ? `you typed ${p.tag}` : override.reason, by: "you" };
+  }
+  state.messages.push(mine);
+  const pending = { from: target === "claude" ? "claude" : "local", model: target === "local" ? localModel : "", content: "", pending: true, ...(plan ? { mode: "plan" } : {}) };
+  state.messages.push(pending);
+  const localVerb = () => (readProject ? (plan ? "Reading the project and planning" : "Reading the project") : plan ? "Planning" : "Thinking");
+  let verb = target === "smart" ? "Routing" : target === "claude" ? (plan ? "Claude Code is planning" : "Claude Code is working") : localVerb();
+  const started = Date.now();
+  const tick = () => {
+    pending.content = `${verb}… ${Math.round((Date.now() - started) / 1000)}s`;
+    const el = document.querySelector(".msg.pending .content");
+    if (el) el.textContent = pending.content;
+  };
+  tick();
+  renderMessages(true);
+  const timer = setInterval(tick, 1000);
+  try {
+    const typed = p.tag ? `you typed ${p.tag}` : null;
+    let route = target === "smart" ? null : { to: target, reason: typed || override.reason || (target === "claude" ? "you chose Claude" : "you chose local"), by: "you" };
+    if (!route) {
+      const r = await api("/api/route", { project: state.project, prompt: text });
+      route = { to: r.route, reason: r.reason, by: r.by, effort: r.effort };
+      mine.route = route;
+      pending.from = route.to === "claude" ? "claude" : "local";
+      pending.model = route.to === "local" ? localModel : "";
+      verb = route.to === "claude" ? (plan ? "Claude Code is planning" : "Claude Code is working") : localVerb();
+      renderMessages(true);
+      tick();
+    }
+    if (route.to === "claude") {
+      const out = await api("/api/claude", {
+        project: state.project, prompt: text, ...claudeOpts(),
+        ...(override.mode ? { mode: override.mode } : {}), ...(override.effort ? { effort: override.effort } : {}),
+        autoEffort: target === "smart" ? route.effort : "", plan, useHistory, route,
+        logText: override.logText || "", exclude: override.exclude || [],
+      });
+      if (out.isError) toast("Claude Code reported an error; see its reply", true);
+    } else {
+      await api("/api/chat", { project: state.project, prompt: text, model: localModel, useHistory, plan, projectContext: readProject, route: target === "smart" || typed || override.reason ? route : null });
+    }
+  } catch (e) {
+    pending.content = `Error: ${e.message}`;
+    pending.pending = false;
+    renderMessages(true);
+    document.querySelector(".msg:last-child .content")?.classList.add("error");
+  } finally {
+    clearInterval(timer);
+    state.sending = false;
+    $("sendBtn").disabled = false;
+  }
+  if (!pending.content.startsWith("Error")) {
+    state.lastCount = -1;
+    await loadHistory(true);
+  }
+  loadProjects();
+}
+
+// ---- usage panel
+let usageRange = store.get("usageRange") || "today";
+const shortPath = (p) => basename(p || "") || p || "(unknown)";
+const prettyClaude = (id) => id.replace(/^claude-/, "").replace(/-(\d+)-(\d+)$/, " $1.$2").replace(/-(\d+)$/, " $1").replace(/^\w/, (c) => c.toUpperCase());
+
+function listTable(rows, label, value, max) {
+  if (!rows.length) return `<div class="muted-note">Nothing in this range.</div>`;
+  return `<table class="ulist">${rows.map((r) => `<tr>
+    <td class="name" title="${esc(r.key)}">${esc(label(r))}</td>
+    <td style="width:35%"><div class="ibar" style="width:${Math.max(1, (value(r) / max) * 100)}%"></div></td>
+    <td class="num">${fmt(value(r))}</td></tr>`).join("")}</table>`;
+}
+
+function dayBars(days) {
+  if (!days.length) return "";
+  const max = Math.max(1, ...days.map((d) => d.out));
+  const bars = days.map((d) => {
+    const label = new Date(d.key + "T12:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+    const tip = `${label}: ${fmt(d.out)} output tokens, ${d.messages} messages`;
+    return `<div class="b ${d.out ? "" : "zero"}" style="height:${(d.out / max) * 100}%" data-tip="${esc(tip)}" aria-label="${esc(tip)}"><span class="hit"></span></div>`;
+  }).join("");
+  const first = new Date(days[0].key + "T12:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return `<h3>Output tokens per day</h3><div class="bars" role="img" aria-label="Claude output tokens per day">${bars}</div>
+    <div class="bar-axis"><span>${esc(first)}</span><span>Peak ${fmt(max)}</span><span>Today</span></div>`;
+}
+
+async function loadUsage() {
+  for (const b of document.querySelectorAll(".range button")) b.classList.toggle("on", b.dataset.range === usageRange);
+  let u;
+  try { u = await api(`/api/usage?range=${usageRange}`); }
+  catch (e) { $("usageBody").innerHTML = `<div class="muted-note error">${esc(e.message)}</div>`; return; }
+  const c = u.claude, lc = u.localViaClaudeCode, b = u.bridge;
+  const tile = (v, l) => `<div class="tile"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  const smartTotal = b.smartLocal + b.smartClaude;
+  $("usageText").textContent = `Usage · ${fmt(c.out)} out ${usageRange === "today" ? "today" : ""}`.trim();
+  $("usageBody").innerHTML = `
+    <h3>Claude Code <small>every session on this PC: desktop app, terminals and runs from here</small></h3>
+    <div class="tiles">
+      ${tile(fmt(c.out), "output tokens")}
+      ${tile(fmt(c.in + c.cacheWrite), "input tokens")}
+      ${tile(fmt(c.cacheRead), "read from cache")}
+      ${tile(c.messages, `replies · ${c.sessions} session${c.sessions === 1 ? "" : "s"}`)}
+      ${c.fastMessages ? tile(c.fastMessages, "fast mode replies") : ""}
+    </div>
+    ${dayBars(c.byDay)}
+    <h3>By model</h3>${listTable(c.byModel, (r) => prettyClaude(r.key), (r) => r.out, Math.max(1, ...c.byModel.map((r) => r.out)))}
+    <h3>By project</h3>${listTable(c.byProject, (r) => shortPath(r.key), (r) => r.out, Math.max(1, ...c.byProject.map((r) => r.out)))}
+    <div class="muted-note">Most input is re-read from Claude's prompt cache, which is cheaper and counts less towards limits.
+      For your plan's limits and reset times, run <code>/usage</code> in Claude Code.
+      ${b.claudeCostUsd ? `Runs started from this chat reported about $${b.claudeCostUsd.toFixed(2)} at API prices.` : ""}</div>
+
+    <h3>Local models <small>work kept off Claude</small></h3>
+    <div class="tiles">
+      ${tile(b.localReplies, "replies in this app")}
+      ${tile(b.handedOff, "tasks Claude handed off")}
+      ${tile(smartTotal ? `${Math.round((b.smartLocal / smartTotal) * 100)}%` : "–", `Smart kept local${smartTotal ? ` (${b.smartLocal} of ${smartTotal})` : ""}`)}
+      ${tile(fmt(b.in + b.out), "tokens on your GPU")}
+      ${lc.messages ? tile(lc.messages, "Claude Code (local) replies") : ""}
+    </div>
+    ${b.byModel.length ? `<h3>By local model</h3>${listTable(b.byModel, (r) => prettyModel(r.key), (r) => r.messages, Math.max(1, ...b.byModel.map((r) => r.messages)))}` : ""}`;
+}
+
+// Hover tooltips for the day bars.
+const tipEl = Object.assign(document.createElement("div"), { className: "chart-tip", hidden: true });
+document.body.appendChild(tipEl);
+document.addEventListener("mousemove", (e) => {
+  const bar = e.target.closest?.(".bars .b");
+  if (!bar) { tipEl.hidden = true; return; }
+  tipEl.textContent = bar.dataset.tip;
+  tipEl.hidden = false;
+  const r = tipEl.getBoundingClientRect();
+  tipEl.style.left = `${Math.min(e.clientX + 12, innerWidth - r.width - 8)}px`;
+  tipEl.style.top = `${e.clientY - r.height - 10}px`;
+});
+
+// Hand a local plan to Claude Code to carry out. It edits files without asking (Auto-accept edits), so confirm
+// once per project; effort is your Settings choice, or medium.
+function implementPlan(m) {
+  const key = `implementOk:${state.project}`;
+  if (store.get(key) !== "1") {
+    const ok = confirm(`Claude Code will carry out this plan in ${basename(state.project)} and edit files without asking about each change (Auto-accept edits). It can't run shell commands from here.
+
+Continue? (You won't be asked again for this project.)`);
+    if (!ok) return;
+    store.set(key, "1");
+  }
+  sendMessage({
+    text:
+      "Carry out this plan, written by a local model from excerpts of this project. Check file and function names " +
+      "against the real code first; where the plan is wrong or incomplete, follow the code and say what you changed. " +
+      "Finish with a short summary of the edits.\n\n<plan>\n" + m.content + "\n</plan>",
+    logText: `Implement the plan above${m.model ? ` (from ${prettyModel(m.model)})` : ""}`,
+    target: "claude",
+    reason: "implementing the local plan",
+    plan: false,
+    mode: "acceptEdits",
+    effort: $("effort").value || "medium",
+    exclude: [m.ts],
+  });
+}
+
+function openUsage() { $("usageDlg").showModal(); loadUsage(); }
+
+async function clearHistory() {
+  if (!state.project || !confirm(`Clear the shared conversation for ${basename(state.project)}?\nClaude and the local models will forget it too.`)) return;
+  await api("/api/reset", { project: state.project });
+  state.lastCount = -1;
+  await loadHistory(true);
+  loadProjects();
+}
+
+function autosize() {
+  const t = $("input");
+  t.style.height = "auto";
+  t.style.height = Math.min(t.scrollHeight, 220) + "px";
+}
+
+// ---- events
+$("projects").addEventListener("click", (e) => {
+  const del = e.target.closest(".row-del");
+  if (del) return openDelete(state.projects[del.dataset.del]);
+  const btn = e.target.closest(".project");
+  if (!btn) return;
+  state.project = state.projects[btn.dataset.i].project;
+  store.set("project", state.project);
+  state.lastCount = -1;
+  renderProjects();
+  renderHeader();
+  loadHistory(true);
+});
+$("list").addEventListener("click", async (e) => {
+  // Hover actions on a message: copy it, retry the prompt on the other side, or get a second opinion.
+  const act = e.target.closest("[data-act]");
+  if (act) {
+    const i = Number(act.closest(".msg").dataset.i);
+    const m = state.messages[i];
+    if (act.dataset.act === "copy") {
+      try { await navigator.clipboard.writeText(m.content); toast("Copied"); } catch { toast("Copy failed", true); }
+      return;
+    }
+    const prompt = [...state.messages.slice(0, i)].reverse().find((x) => x.from === "human")?.content;
+    if (!prompt) return;
+    if (act.dataset.act === "implement") return implementPlan(m);
+    if (act.dataset.act === "claude") sendMessage({ text: prompt, target: "claude", reason: "retried with Claude" });
+    if (act.dataset.act === "local") sendMessage({ text: prompt, target: "local", reason: "retried locally" });
+    if (act.dataset.act === "second") sendMessage({ text: `Second opinion: is this answer right? Point out mistakes or a better approach, briefly.\n\nQuestion: ${prompt}\n\nAnswer:\n${m.content}`, target: "local", model: state.config?.reasoningModel || "deepseek-r1:14b", reason: "second opinion" });
+    return;
+  }
+  const btn = e.target.closest(".copy");
+  if (!btn) return;
+  try {
+    await navigator.clipboard.writeText(btn.nextElementSibling.textContent);
+    btn.textContent = "Copied";
+  } catch { btn.textContent = "Copy failed"; }
+  setTimeout(() => (btn.textContent = "Copy"), 1500);
+});
+for (const id of ["model", "claudeModel", "effort", "localModel", "startMode", "projectFiles"]) {
+  $(id).addEventListener("change", () => { store.set(id, $(id).value); renderSummary(); });
+}
+for (const id of ["fastMode", "useHistory"]) {
+  $(id).addEventListener("change", () => { store.set(id, $(id).checked ? "1" : "0"); renderSummary(); });
+}
+$("usageBtn").addEventListener("click", openUsage);
+$("keysBtn").addEventListener("click", () => $("keysDlg").showModal());
+$("closeKeys").addEventListener("click", () => $("keysDlg").close());
+$("closeUsage").addEventListener("click", () => $("usageDlg").close());
+document.querySelector(".range").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-range]");
+  if (!b) return;
+  usageRange = b.dataset.range;
+  store.set("usageRange", usageRange);
+  loadUsage();
+});
+const openSettings = () => $("settingsDlg").showModal();
+$("settingsBtn").addEventListener("click", openSettings);
+$("summary").addEventListener("click", openSettings);
+$("settingsDone").addEventListener("click", () => $("settingsDlg").close());
+$("planMode").addEventListener("change", () => {
+  store.set("planMode", $("planMode").checked ? "1" : "");
+  setTarget(getTarget());
+});
+document.querySelector(".target").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-target]");
+  if (b) setTarget(b.dataset.target);
+});
+$("sendBtn").addEventListener("click", sendMessage);
+$("input").addEventListener("input", autosize);
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+  // Like a terminal: ↑ in an empty box brings back your last message.
+  else if (e.key === "ArrowUp" && !$("input").value && state.lastSent) {
+    e.preventDefault();
+    $("input").value = state.lastSent;
+    autosize();
+  }
+});
+
+// Drop text files on the message box to paste them in as code blocks (the local model can't open files).
+const composer = document.querySelector(".composer");
+composer.addEventListener("dragover", (e) => { e.preventDefault(); composer.classList.add("drop"); });
+composer.addEventListener("dragleave", () => composer.classList.remove("drop"));
+composer.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  composer.classList.remove("drop");
+  for (const file of e.dataTransfer.files) {
+    if (file.size > 200000) { toast(`${file.name} is over 200 KB; paste the part you need`, true); continue; }
+    const body = await file.text();
+    if (/\u0000/.test(body)) { toast(`${file.name} looks binary, skipped`, true); continue; }
+    const lang = (file.name.split(".").pop() || "").toLowerCase();
+    const t = $("input");
+    t.value += `${t.value ? "\n\n" : ""}${file.name}:\n\`\`\`${lang}\n${body.replace(/\n$/, "")}\n\`\`\`\n`;
+    autosize();
+    toast(`Added ${file.name}`);
+  }
+  $("input").focus();
+});
+
+// Keyboard shortcuts (press ? to see them).
+function isTyping(e) { return /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable; }
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.code === "KeyK") { e.preventDefault(); document.querySelectorAll("dialog[open]").forEach((d) => d.close()); $("input").focus(); return; }
+  if (e.altKey && !e.ctrlKey && !e.metaKey) {
+    const act = { Digit1: () => setTarget("local"), Digit2: () => setTarget("smart"), Digit3: () => setTarget("claude"),
+      KeyP: () => $("planMode").click(), KeyS: openSettings, KeyU: openUsage, KeyN: openAdd }[e.code];
+    if (act) { e.preventDefault(); document.querySelectorAll("dialog[open]").forEach((d) => d.close()); act(); }
+    return;
+  }
+  if (document.querySelector("dialog[open]")) return;
+  if (!isTyping(e) && (e.key === "?" || (e.key === "/" && !e.shiftKey))) {
+    e.preventDefault();
+    if (e.key === "?") $("keysDlg").showModal(); else $("input").focus();
+  }
+});
+$("clearBtn").addEventListener("click", clearHistory);
+$("actions").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-launch]");
+  if (b && !b.disabled) launch(b.dataset.launch);
+});
+$("removeBtn").addEventListener("click", () => openDelete(state.projects.find((x) => x.project === state.project)));
+$("delCancel").addEventListener("click", () => $("delDlg").close());
+$("delConfirm").addEventListener("click", confirmDelete);
+$("addProjectBtn").addEventListener("click", openAdd);
+$("closeAdd").addEventListener("click", () => $("addDlg").close());
+$("addBtn").addEventListener("click", () => addPath());
+$("browseBtn").addEventListener("click", browse);
+$("pathInput").addEventListener("input", refreshCompletion);
+$("pathInput").addEventListener("keydown", (e) => {
+  const n = term.matches.length;
+  if (e.key === "Tab") { e.preventDefault(); tabComplete(); }
+  else if (e.key === "ArrowDown" && n) { e.preventDefault(); term.sel = (term.sel + 1) % n; renderTerm(); }
+  else if (e.key === "ArrowUp" && n) { e.preventDefault(); term.sel = (term.sel - 1 + n) % n; renderTerm(); }
+  else if (e.key === "Enter") {
+    e.preventDefault();
+    if (term.sel >= 0) setPath(term.matches[term.sel]);
+    else addPath();
+  }
+});
+$("termOut").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-i]");
+  if (b) setPath(term.matches[b.dataset.i]);
+});
+$("suggestions").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-path]");
+  if (b) addPath(b.dataset.path);
+});
+$("statusBtn").addEventListener("click", () => { loadStatus(); $("statusDlg").showModal(); });
+$("closeDlg").addEventListener("click", () => $("statusDlg").close());
+
+// ---- start: live-refresh so messages from Claude appear on their own
+(async () => {
+  await loadProjects();
+  if (store.get("planMode") === "1") $("planMode").checked = true;
+  if (store.get("useHistory") === "0") $("useHistory").checked = false;
+  if (["plans", "always", "off"].includes(store.get("projectFiles"))) $("projectFiles").value = store.get("projectFiles");
+  setTarget(["local", "smart", "claude"].includes(store.get("target")) ? store.get("target") : "smart");
+  await Promise.all([loadHistory(true), loadModels(), loadLaunchOptions()]);
+  loadStatus();
+  loadUsage().catch(() => {});
+  setInterval(() => { if (!$("usageDlg").open) loadUsage().catch(() => {}); }, 60000);
+  setInterval(() => loadHistory().catch(() => {}), 3000);
+  setInterval(() => loadProjects().catch(() => {}), 10000);
+  $("input").focus();
+})();
+</script>
+</body>
+</html>

@@ -206,7 +206,8 @@ async function setupModels(cfg) {
     return false;
   }
   let installed = await installedModels(cfg.ollamaUrl);
-  const wanted = [...new Set([cfg.bridgeModel, cfg.reasoningModel, cfg.claudeLocalModel])];
+  // embedModel powers project-aware plans (search by meaning); small (~274 MB).
+  const wanted = [...new Set([cfg.bridgeModel, cfg.reasoningModel, cfg.claudeLocalModel, cfg.embedModel || "nomic-embed-text"])];
   for (const model of wanted) {
     if (installed.has(withTag(model))) {
       ok(`${model} already installed`);
@@ -254,7 +255,7 @@ async function setupPathWindows() {
     ok(`${HERE} is already on your user PATH`);
     return;
   }
-  if (!(await ask(`Add ${HERE} to your user PATH (for claude-local and local-chat)?`))) return;
+  if (!(await ask(`Add ${HERE} to your user PATH (for ollama-bridge, claude-local and local-chat)?`))) return;
   // Pass the folder through an env var so PowerShell quoting can't mangle it.
   process.env.OLLAMA_BRIDGE_DIR = HERE;
   const r = ps(
@@ -269,7 +270,7 @@ async function setupPathWindows() {
 async function setupPathUnix() {
   const bin = path.join(HOME, ".local", "bin");
   fs.mkdirSync(bin, { recursive: true });
-  for (const name of ["claude-local", "local-chat"]) {
+  for (const name of ["ollama-bridge", "claude-local", "local-chat"]) {
     const target = path.join(HERE, name);
     fs.chmodSync(target, 0o755);
     const link = path.join(bin, name);
@@ -301,7 +302,7 @@ async function setupPathUnix() {
   }
   warn(`${bin} isn't on your PATH.`);
   if (!(await ask(`Append this line to ${rc}?\n         ${line}\n      `))) {
-    info(`Add ${bin} to your PATH yourself to use claude-local and local-chat.`);
+    info(`Add ${bin} to your PATH yourself to use ollama-bridge, claude-local and local-chat.`);
     return;
   }
   fs.mkdirSync(path.dirname(rc), { recursive: true });
@@ -310,7 +311,7 @@ async function setupPathUnix() {
 }
 
 async function setupPath() {
-  step("Putting claude-local and local-chat on PATH");
+  step("Putting ollama-bridge, claude-local and local-chat on PATH");
   if (IS_WIN) await setupPathWindows();
   else await setupPathUnix();
 }
@@ -319,15 +320,8 @@ async function setupPath() {
 function claudeMdBlock(cfg) {
   return `${MARK_START}
 ## Local models (ollama-bridge)
-
-The \`ollama-bridge\` MCP server gives you \`ask_local\`, which sends a prompt to a local model in Ollama.
-- Offload simple, well-defined work to it to save usage: boilerplate, small self-contained functions,
-  summaries, test drafts, explanations, renaming/reformatting. Paste in any code it needs (it can't read files),
-  use \`use_history: false\` for one-off tasks, and always review its output before using it.
-- For reasoning-heavy questions, debugging logic or a second opinion, call it with \`model: "${cfg.reasoningModel}"\`
-  (slower and verbose). The default model (${cfg.bridgeModel}) is for quick code tasks.
-- Keep anything needing judgement across the codebase, multi-file edits or tool use yourself.
-- \`local_history\` shows the shared log, including messages the user sent the local model with \`local-chat\`.
+Offload simple, self-contained tasks to \`ask_local\` to save usage (\`model: "${cfg.reasoningModel}"\` for a second
+opinion). Keep multi-file, tool-using or judgement-heavy work yourself.
 ${MARK_END}`;
 }
 
@@ -356,6 +350,8 @@ try {
   await setupPath();
   setupClaudeMd(cfg);
   console.log(`\n${bold(green("Done."))} Open a new terminal, then try:`);
+  info("ollama-bridge ui  (web UI: shared conversations, chat, setup status)");
+  info("ollama-bridge     (list every command)");
   info("claude            (the bridge's ask_local tool is available in every project)");
   info("local-chat        (chat with the local model in this folder's shared log)");
   info(`claude-local      (Claude Code itself on ${cfg.claudeLocalVariant})`);

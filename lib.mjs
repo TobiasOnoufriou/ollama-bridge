@@ -18,6 +18,17 @@ Messages starting with [Claude] come from Claude; messages starting with [Human]
 Claude often hands you smaller, well-defined tasks (writing a function, summarising text, drafting tests, explaining code).
 Answer directly and concisely. When asked for code, return complete, working code in fenced blocks.`;
 
+// Plan mode: think the task through and return a plan instead of doing it, like Claude Code's plan mode.
+const PLAN_PROMPT = `
+
+You are in plan mode: don't write the implementation, and don't mention plan mode. Reply with a plan using these headings:
+1. **Goal**: one or two sentences on what done looks like.
+2. **Questions / assumptions**: anything unclear, and what you'll assume if nobody answers.
+3. **Steps**: a numbered list. For each step name the files, functions or commands involved and what changes.
+4. **Risks**: what could break or is easy to get wrong.
+5. **How to verify**: tests or checks that prove it works.
+Keep it concise. Short code snippets only where a signature or data shape needs pinning down.`;
+
 export function projectDir() {
   return path.resolve(process.env.OLLAMA_BRIDGE_PROJECT || process.cwd());
 }
@@ -41,25 +52,58 @@ export function saveLog(log, dir = projectDir()) {
   fs.writeFileSync(file, JSON.stringify(log, null, 2));
 }
 
+
 // Convert the shared log into Ollama chat messages, newest last, trimmed to the char budget.
-function toOllamaMessages(entries) {
+function toOllamaMessages(entries, maxChars = MAX_HISTORY_CHARS) {
   const out = [];
   let total = 0;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
     const content = e.from === "local" ? e.content : `[${e.from === "claude" ? "Claude" : "Human"}] ${e.content}`;
     total += content.length;
-    if (total > MAX_HISTORY_CHARS && out.length > 0) break;
+    if (total > maxChars && out.length > 0) break;
     out.unshift({ role: e.from === "local" ? "assistant" : "user", content });
   }
   return out;
 }
 
-export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true }) {
-  const dir = projectDir();
+// Every project that has a shared log, most recently active first.
+export function listProjects() {
+  const logs = path.join(HERE, "logs");
+  if (!fs.existsSync(logs)) return [];
+  return fs
+    .readdirSync(logs)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => {
+      try {
+        const log = JSON.parse(fs.readFileSync(path.join(logs, f), "utf8"));
+        const last = log.messages.at(-1);
+        return { project: log.project, messages: log.messages.length, updated: last?.ts || null };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+}
+
+// meta: extra fields stored on the prompt's log entry (e.g. how the smart router chose this model).
+// context: { text, sources } from context.mjs. The project code goes to the model with this prompt only; the log
+// keeps just the list of files used, so the shared conversation (and what Claude is later sent) stays small.
+export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHistory = true, plan = false, meta = {}, context = null, dir = projectDir() }) {
   const log = loadLog(dir);
-  const entry = { from, content: prompt, ts: new Date().toISOString() };
+  const entry = {
+    from,
+    content: prompt,
+    ts: new Date().toISOString(),
+    ...(plan ? { mode: "plan" } : {}),
+    ...(context?.sources?.length ? { context: context.sources } : {}),
+    ...meta,
+  };
   const history = useHistory ? [...log.messages, entry] : [entry];
+  // Leave room in the model's context window for the attached code.
+  const messages = toOllamaMessages(history, context?.text ? Math.min(MAX_HISTORY_CHARS, 24000) : MAX_HISTORY_CHARS);
+  if (context?.text) messages[messages.length - 1].content = `${context.text}\n\n${messages[messages.length - 1].content}`;
 
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
@@ -67,8 +111,8 @@ export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHis
     body: JSON.stringify({
       model,
       stream: false,
-      options: { num_ctx: NUM_CTX },
-      messages: [{ role: "system", content: system || SYSTEM_PROMPT }, ...toOllamaMessages(history)],
+      options: { num_ctx: Math.max(NUM_CTX, context?.text ? 32768 : 0) },
+      messages: [{ role: "system", content: (system || SYSTEM_PROMPT) + (plan ? PLAN_PROMPT : "") }, ...messages],
     }),
   });
   if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${await res.text()}`);
@@ -76,9 +120,13 @@ export async function chat({ from, prompt, model = DEFAULT_MODEL, system, useHis
   // Thinking models may inline their reasoning; keep only the answer.
   const reply = (data.message?.content || "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
-  log.messages.push(entry, { from: "local", model, content: reply, ts: new Date().toISOString() });
-  saveLog(log, dir);
-  return { reply, model };
+  // Re-read before saving: Claude, local-chat and the web UI may all have written while the model was thinking.
+  // Token counts and time from Ollama, for the usage panel (total_duration is in nanoseconds).
+  const usage = { in: data.prompt_eval_count || 0, out: data.eval_count || 0, ms: Math.round((data.total_duration || 0) / 1e6) };
+  const fresh = loadLog(dir);
+  fresh.messages.push(entry, { from: "local", model, content: reply, ts: new Date().toISOString(), usage, ...(plan ? { mode: "plan" } : {}) });
+  saveLog(fresh, dir);
+  return { reply, model, usage };
 }
 
 export async function listModels() {

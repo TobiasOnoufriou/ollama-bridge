@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# ollama-bridge command for macOS/Linux; see `ollama-bridge help`.
+set -euo pipefail
+
+# Resolve symlinks (e.g. ~/.local/bin/ollama-bridge) to find the repo folder.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+HERE="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+exec node "$HERE/ollama-bridge.mjs" "$@"

@@ -4,5 +4,6 @@
   "reasoningModel": "deepseek-r1:14b",
   "claudeLocalModel": "qwen3.6",
   "claudeLocalCtx": 65536,
-  "ollamaUrl": "http://localhost:11434"
+  "ollamaUrl": "http://localhost:11434",
+  "embedModel": "nomic-embed-text"
 }
