@@ -4,7 +4,9 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { spawnSync } from "node:child_process";
 import { HERE } from "./config.mjs";
-import { loadLog, saveLog, logPath, projectDir, listProjects } from "./lib.mjs";
+import { loadLog, saveLog, logPath, projectDir } from "./lib.mjs";
+import { allProjects, addProject, removeProject, resolveUserPath } from "./projects.mjs";
+import { launchIn, LAUNCH_TARGETS } from "./launch.mjs";
 import { checkStatus, modelsWithRoles, effectiveConfig } from "./status.mjs";
 
 const IS_WIN = process.platform === "win32";
@@ -25,7 +27,12 @@ ${bold("Usage:")} ollama-bridge <command> [options]
   ${cyan("status")}                      Check that everything is installed and wired up
   ${cyan("models")}                      List installed models and the role each one plays
   ${cyan("history")} [N]                 Show the last N messages (default 20) of this folder's log
-  ${cyan("projects")}                    List every project that has a shared log
+  ${cyan("projects")}                    List your projects (added folders and ones with a shared log)
+  ${cyan("add")} [folder]                 Add a folder as a project (default: this folder)
+  ${cyan("remove")} [folder]              Remove a project from the list (--delete-history to also clear it)
+  ${cyan("open")} <what> [folder]         Open a new window in a project folder. <what> is one of:
+                              claude (Claude Code), local (Claude Code on the local model),
+                              terminal (a plain shell) or folder (the file manager)
   ${cyan("reset")} [--yes]               Clear this folder's shared log
   ${cyan("install")} [--yes]             Run the installer (safe to re-run)
   ${cyan("help")}                        Show this help
@@ -91,11 +98,43 @@ switch (cmd) {
   }
 
   case "projects": {
-    const projects = listProjects();
-    if (!projects.length) console.log(dim("No shared logs yet."));
-    for (const p of projects) {
-      const when = p.updated ? new Date(p.updated).toLocaleString() : "never";
-      console.log(`  ${p.project}\n    ${dim(`${p.messages} messages, last ${when}`)}`);
+    for (const p of allProjects()) {
+      const when = p.updated ? `last ${new Date(p.updated).toLocaleString()}` : "no messages yet";
+      const tags = [p.current && "here", !p.exists && red("missing")].filter(Boolean).join(", ");
+      console.log(`  ${p.project}${tags ? `  (${tags})` : ""}\n    ${dim(`${p.messages} messages, ${when}`)}`);
+    }
+    break;
+  }
+
+  case "add":
+    try {
+      console.log(green(`Added ${addProject(args[0] || ".")}`));
+    } catch (err) {
+      console.error(red(err.message));
+      process.exit(1);
+    }
+    break;
+
+  case "remove": {
+    const deleteHistory = flag("--delete-history");
+    const dir = removeProject(args.find((a) => !a.startsWith("--")) || ".", { deleteHistory });
+    console.log(green(`Removed ${dir} from the list${deleteHistory ? " and deleted its history" : ""}`));
+    break;
+  }
+
+  case "open": {
+    const [what, folder = "."] = args;
+    if (!(what in LAUNCH_TARGETS)) {
+      console.error(red(`Usage: ollama-bridge open <${Object.keys(LAUNCH_TARGETS).join("|")}> [folder]`));
+      process.exit(1);
+    }
+    try {
+      const dir = resolveUserPath(folder);
+      await launchIn(dir, what);
+      console.log(green(`Opened ${LAUNCH_TARGETS[what]} in ${dir}`));
+    } catch (err) {
+      console.error(red(err.message));
+      process.exit(1);
     }
     break;
   }

@@ -52,6 +52,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; }
   body {
     background: var(--bg);
@@ -185,6 +186,53 @@
   .cfg { margin-top: 14px; font-size: 13px; color: var(--muted); }
   .cfg code { font-family: var(--mono); color: var(--text); }
 
+  /* Projects header + per-project actions */
+  .section-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 6px 16px; }
+  .section-row .section-label { padding: 0; }
+  .add-btn { padding: 3px 10px; font-size: 13px; }
+  .tag.missing { background: transparent; color: var(--warn); border: 1px solid var(--warn); }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .actions button { padding: 4px 10px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+  .actions button:disabled { opacity: .45; cursor: default; }
+  .actions .sep { flex: 1; }
+  .ico { width: 14px; height: 14px; flex: none; }
+
+  /* Terminal-style "Add project" dialog */
+  .term {
+    margin: 14px 18px 0; border-radius: 10px; background: #111110; color: #e6e6e1;
+    font-family: var(--mono); font-size: 13px; border: 1px solid #2c2c29; overflow: hidden;
+  }
+  .term-line { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #2c2c29; }
+  .term-line .prompt { color: #69c27d; white-space: nowrap; user-select: none; }
+  .term-line input {
+    flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: inherit; font: inherit; caret-color: #69c27d;
+  }
+  .term-out { padding: 8px 12px 10px; max-height: 240px; overflow-y: auto; line-height: 1.6; }
+  .term-out .ok { color: #69c27d; }
+  .term-out .err { color: #ff7b7b; }
+  .term-out .muted { color: #8a8a84; }
+  .term-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 12px; margin-top: 4px; }
+  .term-grid button {
+    all: unset; cursor: pointer; color: #7c9bff; padding: 0 4px; border-radius: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .term-grid button:hover, .term-grid button.sel { background: #2a3352; color: #fff; }
+  .add-actions { display: flex; align-items: center; gap: 10px; padding: 12px 18px; flex-wrap: wrap; }
+  .add-actions .grow { flex: 1; font-size: 12px; color: var(--muted); }
+  kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+  #suggestions { padding: 0 10px 14px; }
+  #suggestions .project .meta { font-family: var(--mono); }
+  .add-dlg .section-label { padding: 4px 18px 6px; }
+
+  /* Toast */
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px;
+    transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100vw - 32px); z-index: 10;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.err { background: var(--bad); color: #fff; }
+
   /* Narrow screens: sidebar becomes a top strip */
   @media (max-width: 760px) {
     body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
@@ -197,7 +245,10 @@
 <body>
 <aside>
   <div class="brand"><span class="logo"></span>ollama-bridge</div>
-  <div class="section-label">Projects</div>
+  <div class="section-row">
+    <div class="section-label">Projects</div>
+    <button class="add-btn" id="addProjectBtn" title="Add a project folder">+ Add</button>
+  </div>
   <div id="projects"></div>
   <button class="status-btn" id="statusBtn"><span class="dot" id="statusDot"></span><span id="statusText">Checking setup…</span></button>
 </aside>
@@ -207,6 +258,18 @@
     <div class="title">
       <h1 id="projName">…</h1>
       <div class="path" id="projPath"></div>
+      <div class="actions" id="actions">
+        <button data-launch="claude" title="Open Claude Code in this folder, in a new terminal window">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 4l4 4-4 4M8.5 12H13"/></svg>Claude</button>
+        <button data-launch="local" title="Open Claude Code on your local model in this folder">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="3" width="11" height="8" rx="1.5"/><path d="M5.5 14h5M8 11v3"/></svg>Claude (local)</button>
+        <button data-launch="terminal" title="Open a terminal in this folder">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6.5l2 1.5-2 1.5M8 10h3"/></svg>Terminal</button>
+        <button data-launch="folder" title="Open this folder in your file manager">
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 4.5a1 1 0 011-1h3.5l1.5 1.5h6a1 1 0 011 1v6a1 1 0 01-1 1h-11a1 1 0 01-1-1z"/></svg>Folder</button>
+        <span class="sep"></span>
+        <button class="ghost" id="removeBtn" title="Remove this project from the list">Remove</button>
+      </div>
     </div>
     <div class="controls">
       <select id="model" title="Model to reply"></select>
@@ -225,6 +288,25 @@
     <div class="hint">Enter to send, Shift+Enter for a new line. Claude sees this conversation through <code>local_history</code>.</div>
   </div>
 </main>
+
+<dialog id="addDlg" class="add-dlg">
+  <div class="dlg-head"><h2>Add a project</h2><button class="ghost" id="closeAdd">Close</button></div>
+  <div class="term">
+    <div class="term-line"><span class="prompt">$ cd</span><input id="pathInput" spellcheck="false" autocomplete="off" aria-label="Folder path"></div>
+    <div class="term-out" id="termOut"></div>
+  </div>
+  <div class="add-actions">
+    <button id="browseBtn">Browse…</button>
+    <span class="grow"><kbd>Tab</kbd> completes · <kbd>↑</kbd><kbd>↓</kbd> choose · <kbd>Enter</kbd> adds</span>
+    <button class="primary" id="addBtn">Add project</button>
+  </div>
+  <div id="suggestWrap" hidden>
+    <div class="section-label">Recent Claude Code folders</div>
+    <div id="suggestions"></div>
+  </div>
+</dialog>
+
+<div id="toast" role="status"></div>
 
 <dialog id="statusDlg">
   <div class="dlg-head"><h2>Setup status</h2><button class="ghost" id="closeDlg">Close</button></div>
@@ -293,7 +375,7 @@ function relTime(ts) {
 function renderProjects() {
   $("projects").innerHTML = state.projects.map((p, i) => `
     <button class="project ${p.project === state.project ? "active" : ""}" data-i="${i}" title="${esc(p.project)}">
-      <div class="name">${esc(basename(p.project))}${p.current ? '<span class="tag">here</span>' : ""}</div>
+      <div class="name">${esc(basename(p.project))}${p.current ? '<span class="tag">here</span>' : ""}${p.exists ? "" : '<span class="tag missing">missing</span>'}</div>
       <div class="meta">${p.messages} message${p.messages === 1 ? "" : "s"} · ${relTime(p.updated)}</div>
     </button>`).join("");
 }
@@ -326,6 +408,144 @@ function renderMessages(scroll) {
 function renderHeader() {
   $("projName").textContent = state.project ? basename(state.project) : "No project";
   $("projPath").textContent = state.project || "";
+  const p = state.projects.find((x) => x.project === state.project);
+  for (const b of document.querySelectorAll("[data-launch]")) {
+    b.disabled = !p?.exists;
+    if (p && !p.exists) b.title = "This folder no longer exists";
+  }
+  $("removeBtn").hidden = !p || p.current;
+}
+
+let toastTimer;
+function toast(msg, isErr = false) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = `show${isErr ? " err" : ""}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.className = ""), isErr ? 5000 : 2500);
+}
+
+// ---- project actions
+const LAUNCH_LABEL = { claude: "Claude Code", local: "Claude Code (local model)", terminal: "a terminal", folder: "the folder" };
+async function launch(what) {
+  if (!state.project) return;
+  try {
+    await api("/api/launch", { project: state.project, what });
+    toast(`Opened ${LAUNCH_LABEL[what]} in ${basename(state.project)}`);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function removeCurrent() {
+  const p = state.projects.find((x) => x.project === state.project);
+  if (!p || !confirm(`Remove ${basename(p.project)} from the list?\nThe folder itself isn't touched.`)) return;
+  const deleteHistory = p.messages > 0 && confirm(`Also delete its shared conversation (${p.messages} messages)?\nCancel keeps it, so it comes back if you add the folder again.`);
+  await api("/api/projects/remove", { project: p.project, deleteHistory });
+  state.project = null;
+  store.set("project", "");
+  await loadProjects();
+  state.lastCount = -1;
+  loadHistory(true);
+  toast(`Removed ${basename(p.project)}`);
+}
+
+// ---- "Add project": a little terminal with folder completion
+const term = { matches: [], sel: -1, resolved: "", exists: false, seq: 0 };
+const sep = () => (navigator.userAgent.includes("Windows") ? "\\" : "/");
+
+async function refreshCompletion() {
+  const seq = ++term.seq;
+  const value = $("pathInput").value;
+  let r;
+  try { r = await api(`/api/complete?path=${encodeURIComponent(value)}`); } catch (e) { return; }
+  if (seq !== term.seq) return; // a newer keystroke already asked
+  term.matches = r.matches;
+  term.sel = -1;
+  term.resolved = r.resolved;
+  term.exists = r.exists;
+  renderTerm();
+}
+
+function renderTerm(error) {
+  const lines = [];
+  if (error) lines.push(`<div class="err">${esc(error)}</div>`);
+  else if (!$("pathInput").value.trim()) lines.push(`<div class="muted">Type a folder path, or press Tab to list folders.</div>`);
+  else if (term.exists) lines.push(`<div class="ok">✓ ${esc(term.resolved)}</div>`);
+  else lines.push(`<div class="muted">No folder called ${esc(term.resolved)} yet${term.matches.length ? ", keep typing or press Tab" : ""}</div>`);
+  if (term.matches.length) {
+    lines.push(`<div class="term-grid">${term.matches.map((m, i) =>
+      `<button type="button" data-i="${i}" class="${i === term.sel ? "sel" : ""}" title="${esc(m)}">${esc(basename(m))}${sep()}</button>`).join("")}</div>`);
+  }
+  $("termOut").innerHTML = lines.join("");
+  $("termOut").querySelector(".sel")?.scrollIntoView({ block: "nearest" });
+}
+
+function setPath(value) {
+  const input = $("pathInput");
+  input.value = value;
+  input.focus();
+  input.setSelectionRange(value.length, value.length);
+  refreshCompletion();
+}
+
+function commonPrefix(list) {
+  if (!list.length) return "";
+  let prefix = list[0];
+  for (const s of list.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < s.length && prefix[i].toLowerCase() === s[i].toLowerCase()) i++;
+    prefix = prefix.slice(0, i);
+  }
+  return prefix;
+}
+
+function tabComplete() {
+  if (term.sel >= 0) return setPath(term.matches[term.sel]);
+  if (term.matches.length === 1) return setPath(term.matches[0]);
+  const prefix = commonPrefix(term.matches);
+  if (prefix && prefix.length > $("pathInput").value.length) setPath(prefix);
+}
+
+async function addPath(value) {
+  const path = (value ?? $("pathInput").value).trim();
+  if (!path) return renderTerm("Type a folder path first.");
+  try {
+    const { project } = await api("/api/projects/add", { path });
+    $("addDlg").close();
+    state.project = project;
+    store.set("project", project);
+    await loadProjects();
+    state.lastCount = -1;
+    loadHistory(true);
+    toast(`Added ${basename(project)}`);
+  } catch (e) { renderTerm(e.message); }
+}
+
+async function browse() {
+  const btn = $("browseBtn");
+  btn.disabled = true;
+  btn.textContent = "Choose a folder in the window that opened…";
+  try {
+    const { path } = await api("/api/pick-folder", {});
+    if (path) setPath(path);
+  } catch (e) { renderTerm(e.message); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = "Browse…";
+  }
+}
+
+async function openAdd() {
+  const current = state.projects.find((p) => p.current)?.project;
+  // Start one level up from the current project, like being in a terminal next to your other projects.
+  const start = current ? current.replace(/[\\/][^\\/]+[\\/]?$/, "") + sep() : "~" + sep();
+  $("addDlg").showModal();
+  setPath(start);
+  try {
+    const sugg = await api("/api/suggestions");
+    $("suggestWrap").hidden = !sugg.length;
+    $("suggestions").innerHTML = sugg.map((p) => `
+      <button class="project" data-path="${esc(p)}"><div class="name">${esc(basename(p))}</div><div class="meta">${esc(p)}</div></button>`).join("");
+  } catch { $("suggestWrap").hidden = true; }
 }
 
 // ---- data loading
@@ -461,6 +681,35 @@ $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
 });
 $("clearBtn").addEventListener("click", clearHistory);
+$("actions").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-launch]");
+  if (b && !b.disabled) launch(b.dataset.launch);
+});
+$("removeBtn").addEventListener("click", removeCurrent);
+$("addProjectBtn").addEventListener("click", openAdd);
+$("closeAdd").addEventListener("click", () => $("addDlg").close());
+$("addBtn").addEventListener("click", () => addPath());
+$("browseBtn").addEventListener("click", browse);
+$("pathInput").addEventListener("input", refreshCompletion);
+$("pathInput").addEventListener("keydown", (e) => {
+  const n = term.matches.length;
+  if (e.key === "Tab") { e.preventDefault(); tabComplete(); }
+  else if (e.key === "ArrowDown" && n) { e.preventDefault(); term.sel = (term.sel + 1) % n; renderTerm(); }
+  else if (e.key === "ArrowUp" && n) { e.preventDefault(); term.sel = (term.sel - 1 + n) % n; renderTerm(); }
+  else if (e.key === "Enter") {
+    e.preventDefault();
+    if (term.sel >= 0) setPath(term.matches[term.sel]);
+    else addPath();
+  }
+});
+$("termOut").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-i]");
+  if (b) setPath(term.matches[b.dataset.i]);
+});
+$("suggestions").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-path]");
+  if (b) addPath(b.dataset.path);
+});
 $("statusBtn").addEventListener("click", () => { loadStatus(); $("statusDlg").showModal(); });
 $("closeDlg").addEventListener("click", () => $("statusDlg").close());
 

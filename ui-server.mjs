@@ -4,8 +4,10 @@ import http from "node:http";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { HERE } from "./config.mjs";
-import { chat, loadLog, saveLog, listProjects } from "./lib.mjs";
+import { chat, loadLog, saveLog } from "./lib.mjs";
 import { checkStatus, modelsWithRoles, effectiveConfig } from "./status.mjs";
+import { allProjects, addProject, removeProject, isKnownProject, claudeCodeProjects, completeDir } from "./projects.mjs";
+import { pickFolder, launchIn } from "./launch.mjs";
 
 const DEFAULT_PORT = 4317;
 const INDEX = path.join(HERE, "ui", "index.html");
@@ -33,14 +35,6 @@ function readBody(req) {
   });
 }
 
-function projects() {
-  const list = listProjects();
-  if (!list.some((p) => path.resolve(p.project) === startDir)) {
-    list.unshift({ project: startDir, messages: 0, updated: null });
-  }
-  return list.map((p) => ({ ...p, current: path.resolve(p.project) === startDir }));
-}
-
 function projectParam(value) {
   if (typeof value !== "string" || !path.isAbsolute(value)) throw new Error("project must be an absolute path");
   return path.resolve(value);
@@ -52,7 +46,12 @@ async function route(req, res, url) {
     return send(res, 200, fs.readFileSync(INDEX, "utf8"), "text/html; charset=utf-8");
   }
   if (req.method === "GET" && pathname === "/api/config") return send(res, 200, { ...effectiveConfig(), startDir });
-  if (req.method === "GET" && pathname === "/api/projects") return send(res, 200, projects());
+  if (req.method === "GET" && pathname === "/api/projects") return send(res, 200, allProjects(startDir));
+  if (req.method === "GET" && pathname === "/api/complete") return send(res, 200, completeDir(url.searchParams.get("path")));
+  if (req.method === "GET" && pathname === "/api/suggestions") {
+    const listed = new Set(allProjects(startDir).map((p) => p.project.toLowerCase()));
+    return send(res, 200, claudeCodeProjects().filter((p) => !listed.has(p.toLowerCase())));
+  }
   if (req.method === "GET" && pathname === "/api/history") {
     return send(res, 200, loadLog(projectParam(url.searchParams.get("project"))));
   }
@@ -74,6 +73,18 @@ async function route(req, res, url) {
         dir: projectParam(body.project),
       });
       return send(res, 200, { ...out, ms: Date.now() - started });
+    }
+    if (pathname === "/api/projects/add") return send(res, 200, { project: addProject(body.path) });
+    if (pathname === "/api/projects/remove") {
+      return send(res, 200, { project: removeProject(projectParam(body.project), { deleteHistory: !!body.deleteHistory }) });
+    }
+    if (pathname === "/api/pick-folder") return send(res, 200, { path: await pickFolder() });
+    if (pathname === "/api/launch") {
+      const dir = projectParam(body.project);
+      // Only open terminals in folders that are on the project list.
+      if (!isKnownProject(dir, startDir)) return send(res, 400, { error: "Add the folder as a project first" });
+      await launchIn(dir, body.what);
+      return send(res, 200, { ok: true });
     }
     if (pathname === "/api/reset") {
       const dir = projectParam(body.project);

@@ -5,6 +5,7 @@ Connects Claude Code to local models running in [Ollama](https://ollama.com), wi
 - **Bridge (MCP server):** gives Claude an `ask_local` tool so it can offload simple tasks to a local model. Claude, the local model and you (via `local-chat`) all share one conversation log per project folder.
 - **`claude-local`:** runs Claude Code itself on a local model instead of Anthropic's API (offline, private, no cost; much slower and less capable).
 - **Web UI (`ollama-bridge ui`):** see every project's shared conversation (Claude, you and the models, live), chat with any installed model, clear history, and check your setup.
+- **Projects:** add any folder as a project (terminal-style path box with Tab completion, the system folder picker, or your recent Claude Code folders), then open Claude Code, Claude Code on the local model, a terminal or the file manager in it with one click.
 
 No npm dependencies; needs Node 18+.
 
@@ -52,7 +53,12 @@ ollama-bridge claude             # Claude Code on the local model (qwen3.6-cc by
 ollama-bridge status             # check everything is installed and wired up, with fixes
 ollama-bridge models             # installed models and their roles (default / reasoning / claude-local)
 ollama-bridge history 10         # last 10 messages of this folder's shared log
-ollama-bridge projects           # every project with a shared log
+ollama-bridge projects           # your projects (added folders and ones with a shared log)
+ollama-bridge add ~/code/my-app  # add a folder as a project (default: this folder)
+ollama-bridge remove             # remove this folder from the list (--delete-history to clear it too)
+ollama-bridge open claude        # new terminal window running Claude Code in this folder
+ollama-bridge open local ~/code/my-app   # ...Claude Code on the local model, in another folder
+ollama-bridge open terminal      # ...or just a shell; `open folder` opens the file manager
 ollama-bridge reset              # clear this folder's shared log
 ollama-bridge install            # re-run the installer
 ```
@@ -62,6 +68,20 @@ ollama-bridge install            # re-run the installer
 The web UI only listens on `127.0.0.1`, refuses other hostnames and cross-site requests, and refreshes
 every few seconds, so messages Claude sends with `ask_local` appear on their own. Use `--port N` to pick
 another port or `--no-open` to skip opening the browser.
+
+### Projects in the web UI
+
+Click **+ Add** to add a folder. The box works like `cd` in a terminal: type a path (`~` works), press
+<kbd>Tab</kbd> to complete folder names, <kbd>↑</kbd>/<kbd>↓</kbd> to pick from the list and <kbd>Enter</kbd> to add.
+**Browse…** opens your system's folder picker, and folders you've used Claude Code in are suggested below.
+The list is saved per machine in `projects.json` (not committed). Removing a project only hides it; the folder
+is never touched, and its conversation is kept unless you choose to delete it.
+
+Each project has buttons to open, in that folder: **Claude** (Claude Code in a new terminal), **Claude (local)**
+(the same on your local model), **Terminal** and **Folder**. Windows uses Windows Terminal when it's installed
+(otherwise a PowerShell window), macOS uses Terminal.app, and Linux uses the first terminal it finds
+(`x-terminal-emulator`, GNOME Terminal, Konsole, xfce4-terminal, kitty, Alacritty or xterm). On Linux, **Browse…**
+needs `zenity` or `kdialog`; you can always type the path instead.
 
 ## Configuration
 

@@ -5,3 +5,4 @@ node_modules/
 # Per-machine settings and generated files (see install.mjs)
 config.json
 models/
+projects.json
