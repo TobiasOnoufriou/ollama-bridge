@@ -10,5 +10,6 @@
   "ollamaUrl": "http://localhost:11434",
   "embedModel": "nomic-embed-text",
   "newSessionHintTokens": 100000,
-  "newSessionHintEvery": 50000
+  "newSessionHintEvery": 50000,
+  "smartModels": { "easy": "haiku", "medium": "sonnet", "hard": "opus" }
 }

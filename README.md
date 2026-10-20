@@ -218,8 +218,24 @@ counted; files changed by a shell command (Auto mode) aren't listed.
 
 **Smart effort.** When Settings → Effort is left on *Default*, Smart also picks an effort for Claude: **low** for
 a quick lookup or a short question about one file, **medium** for anything else (fixing, debugging, several
-steps). It never picks above medium; an effort you choose in Settings always wins. Replies show it, e.g.
-*Claude Code (low effort, auto)*.
+steps). It never picks above medium; an effort you choose in Settings always wins.
+
+**Smart model.** For every prompt that goes to Claude, the local model also rates how hard it is, and that picks
+the Claude model when Settings → Claude model is left on *Default*:
+
+| Difficulty | Examples | Model |
+| --- | --- | --- |
+| easy | a lookup, a short explanation, a question about one file, a typo or rename | Haiku |
+| medium | a feature or bug fix in one or a few files, debugging with a clear error, tests | Sonnet |
+| hard | design decisions, large refactors or migrations, subtle or vague bugs, tricky algorithms | Opus |
+
+When torn it picks the harder one. If Ollama isn't running, low-effort prompts count as easy and the rest as
+medium. A model you choose in Settings (or `--model` for `ask`) always wins. The prompt's chip shows the rating,
+e.g. *Smart → Claude · hard → opus · needs work on the project itself*, and replies show what Smart picked, e.g.
+*Claude Code (Smart: sonnet, low effort)*. Change the mapping with `smartModels` in `config.json` (any Claude
+alias or model id, e.g. `{ "easy": "sonnet", "medium": "sonnet", "hard": "opus" }`), or set it to `{}` to turn
+automatic model choice off. Switching models in the middle of a resumed chat session can't reuse the prompt cache
+from the previous model, so that one turn costs a bit more.
 
 #### How Claude runs from the chat stay cheap
 
@@ -409,6 +425,7 @@ Edit `config.json` (per machine, not committed) and re-run `node install.mjs` to
 | `embedModel` | `nomic-embed-text` | project-aware plans (search by meaning); the installer offers to download it |
 | `newSessionHintTokens` | `100000` | context size at which a new session is suggested; `0` turns the hint off |
 | `newSessionHintEvery` | `50000` | how much further a session grows before the hint shows again |
+| `smartModels` | `{ "easy": "haiku", "medium": "sonnet", "hard": "opus" }` | Claude model Smart uses per difficulty; `{}` turns it off |
 
 Environment variables override the config:
 

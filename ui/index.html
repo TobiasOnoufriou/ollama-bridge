@@ -741,7 +741,7 @@ function msgHtml(m, i) {
   const letter = kind === "claude" ? "C" : kind === "human" ? "Y" : "L";
   const time = m.ts ? `<time>${new Date(m.ts).toLocaleString()}</time>` : "";
   const model = (m.model ? `<span class="model">${esc(m.model)}</span>` : "") + (m.mode === "plan" ? '<span class="badge-plan">Plan</span>' : m.mode === "review" ? '<span class="badge-plan">Review</span>' : m.mode === "task" ? '<span class="badge-plan">Agent</span>' : "");
-  const route = m.route ? `<span class="route-chip to-${m.route.to}" title="${esc(m.route.by === "you" ? "Chosen by you" : m.route.by === "rules" ? "Decided by a rule" : "Decided by the local classifier")}">${m.route.by === "you" ? "→" : "Smart →"} <b>${m.route.to === "claude" ? "Claude" : "Local"}</b> · ${esc(m.route.reason)}</span>` : "";
+  const route = m.route ? `<span class="route-chip to-${m.route.to}" title="${esc(m.route.by === "you" ? "Chosen by you" : m.route.by === "rules" ? "Decided by a rule" : "Decided by the local classifier")}">${m.route.by === "you" ? "→" : "Smart →"} <b>${m.route.to === "claude" ? "Claude" : "Local"}</b>${m.route.difficulty ? ` · <span title="${esc(`How hard the local model rated it${m.route.model ? `; ${m.route.model} runs it when Settings → Claude model is Default` : ""}`)}">${esc(m.route.difficulty)}${m.route.model ? ` → ${esc(m.route.model)}` : ""}</span>` : ""} · ${esc(m.route.reason)}</span>` : "";
   const acts = m.pending ? "" : `<div class="msg-actions">
       <button data-act="copy" title="Copy this message">Copy</button>
       ${kind === "local" && m.mode === "plan" ? `<button class="impl" data-act="implement" title="Send this plan to Claude Code to carry out, editing files (Auto-accept edits)">Implement with Claude</button>` : ""}
@@ -1429,7 +1429,7 @@ async function sendMessage(override = {}) {
     let route = target === "smart" ? null : { to: target, reason: typed || override.reason || (target === "claude" ? "you chose Claude" : "you chose local"), by: "you" };
     if (!route) {
       const r = await api("/api/route", { project: state.project, sub, prompt: text, runId });
-      route = { to: r.route, reason: r.reason, by: r.by, effort: r.effort };
+      route = { to: r.route, reason: r.reason, by: r.by, effort: r.effort, difficulty: r.difficulty, model: r.model };
       mine.route = route;
       pending.from = route.to === "claude" ? "claude" : "local";
       pending.model = route.to === "local" ? localModel : "";
@@ -1446,7 +1446,7 @@ async function sendMessage(override = {}) {
       const out = await api("/api/claude", {
         project: state.project, sub, prompt: text, ...claudeOpts(),
         ...(override.mode ? { mode: override.mode } : {}), ...(override.effort ? { effort: override.effort } : {}),
-        autoEffort: target === "smart" ? route.effort : "", plan, useHistory, route,
+        autoEffort: target === "smart" ? route.effort : "", autoModel: target === "smart" ? route.model || "" : "", plan, useHistory, route,
         logText: override.logText || "", exclude: override.exclude || [], runId, progressId,
       });
       if (out.stopped) toast("Stopped. Claude's reply so far isn't kept, but any edits it made are");

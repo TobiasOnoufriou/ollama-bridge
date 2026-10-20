@@ -61,7 +61,9 @@ async function cancellable(runId, lockKey, fn) {
 // How the smart router decided, stored on the prompt's log entry so the UI can show it.
 function routeMeta(route) {
   if (!route || !["local", "claude"].includes(route.to)) return {};
-  return { route: { to: route.to, reason: String(route.reason || "").slice(0, 160), by: String(route.by || "").slice(0, 20), ...(["low", "medium"].includes(route.effort) ? { effort: route.effort } : {}) } };
+  return { route: { to: route.to, reason: String(route.reason || "").slice(0, 160), by: String(route.by || "").slice(0, 20), ...(["low", "medium"].includes(route.effort) ? { effort: route.effort } : {}),
+    ...(["easy", "medium", "hard"].includes(route.difficulty) ? { difficulty: route.difficulty } : {}),
+    ...(typeof route.model === "string" && route.model ? { model: route.model.slice(0, 100) } : {}) } };
 }
 
 // Claude sessions in this project whose context has grown past the hint threshold, so the page can suggest a new one:
@@ -278,6 +280,7 @@ async function route(req, res, url) {
         mode: body.plan === true ? "plan" : body.mode === "plan" ? "" : body.mode || "",
         effort: body.effort || "",
         autoEffort: body.autoEffort || "",
+        autoModel: typeof body.autoModel === "string" ? body.autoModel : "",
         logText: typeof body.logText === "string" ? body.logText.slice(0, 300) : "",
         exclude: Array.isArray(body.exclude) ? body.exclude.slice(0, 20).map(String) : [],
         fast: body.fast === true,

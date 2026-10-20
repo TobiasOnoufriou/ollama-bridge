@@ -106,8 +106,9 @@ switch (cmd) {
     const plan = flag("--plan");
     const route = flag("--local") ? { to: "local", reason: "you chose local", by: "you" }
       : flag("--claude") ? { to: "claude", reason: "you chose Claude", by: "you" }
-      : await routePrompt(prompt, { dir: projectDir() }).then((r) => ({ to: r.route, reason: r.reason, by: r.by, effort: r.effort }));
-    console.log(dim(`-> ${route.to === "local" ? "local model" : "Claude Code"}: ${route.reason}${plan ? " (plan mode)" : ""}\n`));
+      : await routePrompt(prompt, { dir: projectDir() }).then((r) => ({ to: r.route, reason: r.reason, by: r.by, effort: r.effort, difficulty: r.difficulty, model: r.model }));
+    const tier = route.difficulty && !modelArg ? ` [${route.difficulty}${route.model ? ` -> ${route.model}` : ""}]` : "";
+    console.log(dim(`-> ${route.to === "local" ? "local model" : "Claude Code"}${tier}: ${route.reason}${plan ? " (plan mode)" : ""}\n`));
     try {
       if (route.to === "local") {
         if (plan && !flag("--quick")) {
@@ -120,7 +121,7 @@ switch (cmd) {
         const { reply, model } = await chat({ from: "human", prompt, model: modelArg || undefined, plan, meta: { route }, context });
         console.log(`${bold(yellow(model))}\n${reply}`);
       } else {
-        const out = await runClaude({ dir: projectDir(), prompt, model: modelArg, mode: plan ? "plan" : "", effort: optArg("--effort"), autoEffort: route.effort, fast: flag("--fast"), meta: { route }, onProgress: (t) => console.log(dim(`  … ${t}`)) });
+        const out = await runClaude({ dir: projectDir(), prompt, model: modelArg, mode: plan ? "plan" : "", effort: optArg("--effort"), autoEffort: route.effort, autoModel: route.model || "", fast: flag("--fast"), meta: { route }, onProgress: (t) => console.log(dim(`  … ${t}`)) });
         console.log(`${bold(cyan(out.model))}${dim(` ${(out.ms / 1000).toFixed(0)}s`)}\n${out.reply}`);
         if (out.changes.length) console.log(dim(`\nChanged: ${out.changes.map((c) => `${c.file} (+${c.added} -${c.removed})`).join(", ")}`));
         if (out.isError) process.exit(1);

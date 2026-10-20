@@ -175,17 +175,19 @@ function spawnClaude(args, opts) {
 // Each project (and each of its sub-sessions) keeps one Claude Code session per toolset in its log, and later runs
 // resume it: the system prompt and earlier turns then come from Claude's prompt cache instead of being sent fresh.
 // autoEffort: Smart's suggestion ("low" or "medium"), used only when no effort is set.
+// autoModel: Smart's model for the prompt's difficulty (e.g. "haiku"), used only when no model is set.
 // Returns { reply, model, ms, costUsd, usage, isError, changes }; changes ([{ file, how, added, removed }]) is also
 // stored on the reply's log entry.
 // logText: what the log shows for the prompt (e.g. a short label instead of a pasted plan).
 // sub: the sub-session ("" = main).
 // onProgress(text): what Claude is doing right now, e.g. "editing lib.mjs (4 actions, 1 file changed)".
-export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", mode: startMode = "", effort = "", autoEffort = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [], onProgress = () => {} }) {
+export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", mode: startMode = "", effort = "", autoEffort = "", autoModel = "", fast = false, useHistory = true, meta = {}, logText = "", exclude = [], onProgress = () => {} }) {
   const usedEffort = effort || (AUTO_EFFORTS.has(autoEffort) ? autoEffort : "");
+  const usedModel = model || autoModel;
   const mode = startMode || "acceptEdits";
   const profile = mode === "plan" ? "read" : mode === "acceptEdits" ? "edit" : "full";
   // claudeArgs validates model, mode and effort. stream-json in print mode needs --verbose.
-  const base = ["-p", "--output-format", "stream-json", "--verbose", ...claudeArgs({ model, mode, effort: usedEffort, fast }), ...PROFILES[profile]];
+  const base = ["-p", "--output-format", "stream-json", "--verbose", ...claudeArgs({ model: usedModel, mode, effort: usedEffort, fast }), ...PROFILES[profile]];
   const track = tracker(path.resolve(dir), onProgress);
 
   const started = Date.now();
@@ -241,8 +243,11 @@ export async function runClaude({ dir, sub = defaultSub(), prompt, model = "", m
       "and sign in, then send this again.";
   }
   const ms = Date.now() - started;
-  const details = [model, usedEffort && `${usedEffort} effort${effort ? "" : ", auto"}`, fast && "fast"].filter(Boolean);
-  const label = `Claude Code${details.length ? ` (${details.join(", ")})` : ""}`;
+  // What you set, then what Smart picked, e.g. "Claude Code (fast; Smart: sonnet, low effort)".
+  const chosen = [model, effort && `${effort} effort`, fast && "fast"].filter(Boolean);
+  const smart = [!model && autoModel, !effort && usedEffort && `${usedEffort} effort`].filter(Boolean);
+  const details = [chosen.join(", "), smart.length && `Smart: ${smart.join(", ")}`].filter(Boolean).join("; ");
+  const label = `Claude Code${details ? ` (${details})` : ""}`;
   const session = json?.session_id || null;
   const tag = session ? { claudeSession: session } : {};
   // A resumed session reports its running total cost; keep just this run's share.

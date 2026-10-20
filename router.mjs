@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { OLLAMA_URL, DEFAULT_MODEL, cancelSignal, loadLog, defaultSub } from "./lib.mjs";
+import { loadConfig } from "./config.mjs";
 
 const CLASSIFIER_PROMPT = `You route a user's request to one of two assistants. Reply with JSON only.
 
@@ -109,16 +110,79 @@ async function byModel(prompt, model) {
   };
 }
 
-// Returns { route: "local" | "claude", effort: "low" | "medium", reason, by: "rules" | "model" | "fallback" }.
+const DIFFICULTY_PROMPT = `You rate how hard a coding request is for an AI coding agent. Reply with JSON only.
+
+"easy": a quick lookup, a short explanation, a question about one file, a rename, a typo, a small obvious edit.
+"medium": ordinary coding work: a feature or bug fix in one or a few files, debugging with a clear error message,
+writing tests, a moderate refactor.
+"hard": architecture or design decisions, large multi-file refactors or migrations, subtle bugs (concurrency,
+security, performance, a vague symptom with no clear cause), tricky algorithms, or anything where a wrong answer
+would be costly.
+
+If torn between two, choose the harder one.`;
+
+const DIFFICULTY_SCHEMA = {
+  type: "object",
+  properties: { difficulty: { type: "string", enum: ["easy", "medium", "hard"] } },
+  required: ["difficulty"],
+};
+
+// Claude model per difficulty (config "smartModels"; empty or missing turns automatic model choice off).
+function smartModels() {
+  const m = loadConfig().smartModels;
+  return m && typeof m === "object" ? m : {};
+}
+
+async function difficultyByModel(prompt, model) {
+  const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: cancelSignal(60000),
+    body: JSON.stringify({
+      model,
+      stream: false,
+      format: DIFFICULTY_SCHEMA,
+      think: false,
+      options: { temperature: 0, num_predict: 30 },
+      messages: [
+        { role: "system", content: DIFFICULTY_PROMPT },
+        { role: "user", content: `Request to rate:
+"""
+${prompt.slice(0, 4000)}
+"""` },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`Ollama returned ${res.status}`);
+  const d = JSON.parse((await res.json()).message?.content || "{}").difficulty;
+  if (!["easy", "medium", "hard"].includes(d)) throw new Error("classifier gave no difficulty");
+  return d;
+}
+
+// For prompts going to Claude: how hard it is, and the Claude model that difficulty maps to.
+// Without the local model, the effort already picked stands in (low -> easy, otherwise medium).
+async function withModel(r, prompt, model) {
+  if (r.route !== "claude") return r;
+  const models = smartModels();
+  if (!Object.keys(models).length) return r;
+  const difficulty = await difficultyByModel(prompt, model).catch(() => (r.effort === "low" ? "easy" : "medium"));
+  const pick = typeof models[difficulty] === "string" ? models[difficulty] : "";
+  return { ...r, difficulty, ...(pick ? { model: pick } : {}) };
+}
+
+// Returns { route: "local" | "claude", effort: "low" | "medium", reason, by: "rules" | "model" | "fallback" },
+// plus for Claude { difficulty: "easy" | "medium" | "hard", model } when config "smartModels" maps difficulties.
 export async function routePrompt(prompt, { dir, sub = defaultSub(), model = DEFAULT_MODEL } = {}) {
   const rule = byRules(prompt, dir, sub);
-  if (rule) return { ...rule, by: "rules" };
+  if (rule) return withModel({ ...rule, by: "rules" }, prompt, model);
+  let r;
   try {
-    return { ...(await byModel(prompt, model)), by: "model" };
+    r = { ...(await byModel(prompt, model)), by: "model" };
   } catch {
     // Local model unavailable: short questions stay local, anything else goes to Claude.
-    return prompt.length < 400
+    r = prompt.length < 400
       ? { route: "local", reason: "short question (classifier unavailable)", by: "fallback" }
       : { route: "claude", effort: "medium", reason: "classifier unavailable", by: "fallback" };
   }
+  return withModel(r, prompt, model);
 }
