@@ -39,6 +39,7 @@ const HELP = `${bold("ollama-bridge")} - Claude Code + local Ollama models with 
 ${bold("Usage:")} ollama-bridge <command> [options]
 
   ${cyan("ui")} [--port N] [--no-open]   Open the web UI (projects, shared conversations, chat, status)
+  ${cyan("desktop")}                     Open the web UI as a desktop app (needs: cd desktop && npm install)
   ${cyan("ask")} "<prompt>"              Smart prompt: routes to the local model or Claude Code, then answers
                               --local / --claude to force a side, --model, --effort, --fast, --plan
   ${cyan("task")} "<what to change>"     Local agent edits this folder's files itself (--model name)
@@ -91,7 +92,27 @@ switch (cmd) {
   case "ui": {
     const { startUi } = await import("./ui-server.mjs");
     const i = args.indexOf("--port");
-    await startUi({ port: i !== -1 ? Number(args[i + 1]) : undefined, open: !flag("--no-open") });
+    await startUi({ port: i !== -1 ? Number(args[i + 1]) : undefined, open: !flag("--no-open"), current: !flag("--no-current") });
+    break;
+  }
+
+  case "desktop": {
+    // Electron's npm package exports the path to its binary; the app gets this folder as the current project.
+    const { createRequire } = await import("node:module");
+    const appDir = path.join(HERE, "desktop");
+    let electron;
+    try {
+      electron = createRequire(path.join(appDir, "package.json"))("electron");
+    } catch {
+      console.error(`The desktop app isn't installed yet. Run:
+  cd "${appDir}"
+  npm install`);
+      process.exit(1);
+    }
+    const { spawn } = await import("node:child_process");
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    spawn(electron, [appDir, process.cwd()], { detached: true, stdio: "ignore", env }).unref();
     break;
   }
 

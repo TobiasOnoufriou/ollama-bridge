@@ -7,3 +7,6 @@ config.json
 models/
 projects.json
 fast-mode.settings.json
+# Desktop app build output
+desktop/dist/
+desktop/bridge-home.json

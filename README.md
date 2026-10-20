@@ -5,9 +5,10 @@ Connects Claude Code to local models running in [Ollama](https://ollama.com), wi
 - **Bridge (MCP server):** gives Claude an `ask_local` tool so it can offload simple tasks to a local model. Claude, the local model and you (via `local-chat`) all share one conversation log per project folder.
 - **`claude-local`:** runs Claude Code itself on a local model instead of Anthropic's API (offline, private, no cost; much slower and less capable).
 - **Web UI (`ollama-bridge ui`):** see every project's shared conversation (Claude, you and the models, live), chat with any installed model, clear history, and check your setup.
+- **Desktop app (`ollama-bridge desktop`):** the same web UI in its own window (Electron), optionally packaged as an installer. See [Desktop app](#desktop-app).
 - **Projects:** add any folder as a project (terminal-style path box with Tab completion, the system folder picker, or your recent Claude Code folders), then open Claude Code, Claude Code on the local model, a terminal or the file manager in it with one click.
 
-No npm dependencies; needs Node 18+.
+No npm dependencies; needs Node 18+. (The optional desktop app in `desktop/` is the one exception: it uses Electron.)
 
 ## Tools exposed to Claude
 
@@ -72,6 +73,7 @@ Everything goes through one command:
 
 ```bash
 ollama-bridge ui                 # web UI at http://127.0.0.1:4317 (opens your browser)
+ollama-bridge desktop            # the web UI in its own app window (see Desktop app below)
 ollama-bridge ask "explain this regex: ^\d{3}$"   # smart prompt: local model or Claude Code, then the answer
 ollama-bridge ask --claude "why do the tests fail?"  # force a side (--local / --claude), --model, --plan
 ollama-bridge chat               # chat in the terminal, in this folder's shared log
@@ -102,7 +104,44 @@ ollama-bridge install            # re-run the installer
 
 The web UI only listens on `127.0.0.1`, refuses other hostnames and cross-site requests, and refreshes
 every few seconds, so messages Claude sends with `ask_local` appear on their own. Use `--port N` to pick
-another port or `--no-open` to skip opening the browser.
+another port or `--no-open` to skip opening the browser. `--no-current` leaves out the folder the UI was
+started in as the "current" project (the desktop app uses it when started from a shortcut).
+
+### Desktop app
+
+`desktop/` wraps the web UI in an Electron window: its own taskbar/Dock icon, no browser tabs, and window size
+and position remembered between runs. It starts the normal `node ollama-bridge.mjs ui` server as a child process
+and stops it (and any Claude runs it started) when you close the window. Node 18+ still has to be on your PATH.
+
+One-time setup (downloads Electron and electron-builder, about 470 MB):
+
+```bash
+cd desktop
+npm install
+```
+
+Then `ollama-bridge desktop` (or `npm start` in `desktop/`) opens it. Started from a terminal, the folder you're in
+is the current project, just like `ollama-bridge ui`.
+
+To build an installer for your OS (Windows NSIS `.exe`, macOS `.dmg`, Linux AppImage) into `desktop/dist/`:
+
+```bash
+cd desktop
+npm run dist
+```
+
+`npm run dist:dir` builds an unpacked app instead, which is quicker for testing. The app finds the bridge folder in
+this order:
+
+1. the `OLLAMA_BRIDGE_HOME` environment variable;
+2. the checkout it was built from, if it still exists (recorded in `bridge-home.json` at build time), so on your own
+   machine it shares this checkout's config, logs and MCP registration;
+3. a copy of the bridge bundled into the package. On another machine, run `node install.mjs` in that copy (the
+   app's `resources/bridge` folder) to set up config and the MCP server. Its logs live there too, so reinstalling
+   or uninstalling the app clears them.
+
+Links to other sites open in your normal browser. The build uses the default Electron icon and isn't code-signed,
+so Windows SmartScreen and macOS Gatekeeper will warn the first time.
 
 ### Projects in the web UI
 

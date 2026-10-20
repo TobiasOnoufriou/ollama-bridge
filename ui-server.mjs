@@ -88,7 +88,8 @@ function sessionHints(dir, sub) {
 
 const DEFAULT_PORT = 4317;
 const INDEX = path.join(HERE, "ui", "index.html");
-const startDir = path.resolve(process.cwd());
+// The folder the UI was started in, listed first as the "current" project; null for none (desktop app from a shortcut).
+let startDir = path.resolve(process.cwd());
 
 function send(res, status, body, type = "application/json") {
   res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
@@ -370,7 +371,8 @@ function listen(server, port, tries = 10) {
   });
 }
 
-export async function startUi({ port = DEFAULT_PORT, open = true } = {}) {
+export async function startUi({ port = DEFAULT_PORT, open = true, current = true } = {}) {
+  if (!current) startDir = null;
   let actualPort;
   const server = http.createServer(async (req, res) => {
     // Reject other hostnames (DNS rebinding) and cross-site POSTs.
@@ -389,7 +391,7 @@ export async function startUi({ port = DEFAULT_PORT, open = true } = {}) {
   actualPort = await listen(server, port);
   const url = `http://127.0.0.1:${actualPort}`;
   console.log(`ollama-bridge UI running at ${url}  (Ctrl+C to stop)`);
-  console.log(`Current project: ${startDir}`);
+  if (startDir) console.log(`Current project: ${startDir}`);
   if (open) openBrowser(url);
   return { server, url };
 }

@@ -1,0 +1,69 @@
+{
+  "name": "ollama-bridge-desktop",
+  "productName": "ollama-bridge",
+  "version": "1.0.0",
+  "description": "Desktop window for the ollama-bridge web UI",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "node record-home.mjs && electron-builder",
+    "dist:dir": "node record-home.mjs && electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.ollama-bridge.desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.mjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "bridge-home.json",
+        "to": "bridge-home.json"
+      },
+      {
+        "from": "..",
+        "to": "bridge",
+        "filter": [
+          "*.mjs",
+          "*.cmd",
+          "*.ps1",
+          "ollama-bridge",
+          "claude-local",
+          "local-chat",
+          "config.example.json",
+          "README.md",
+          "ui/**",
+          "!desktop/**",
+          "!node_modules/**",
+          "!logs/**",
+          "!models/**",
+          "!.git/**"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Development"
+    }
+  },
+  "devDependencies": {
+    "electron": "44.9.2",
+    "electron-builder": "26.15.3"
+  }
+}

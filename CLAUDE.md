@@ -10,7 +10,8 @@ detailed; keep it in sync when behaviour, commands, settings or config keys chan
 
 ## Commands
 
-Plain Node 18+ ES modules. No npm dependencies, no package.json, no build step, no test suite, no linter.
+Plain Node 18+ ES modules. No npm dependencies, no package.json, no build step, no test suite, no linter. The one
+exception is the optional Electron app in `desktop/` (its own `package.json`; nothing in the root imports from it).
 
 ```bash
 node ollama-bridge.mjs help              # every subcommand (ui, ask, chat, status, issues, handoff, ...)
@@ -48,6 +49,8 @@ Entry points, all thin over shared modules:
   every Claude Code session, so keep them short; `local_history` output is capped for the same reason.
 - `ollama-bridge.mjs`: CLI dispatcher; heavier modules (`ui-server`, `issues`, `handoff`) are lazy-imported.
   `chat.mjs`, `claude-local*`, `local-chat*` and the `.cmd`/bash wrappers are shortcuts into it or `config.mjs`.
+- `desktop/main.mjs`: Electron shell that spawns `node ollama-bridge.mjs ui --no-open` and loads its URL. Electron
+  doesn't support `prompt()`, so the page uses `askText()` instead; don't add `prompt()` calls back.
 - `ui-server.mjs` + `ui/index.html`: `node:http` JSON API plus a single self-contained HTML page (no framework,
   no bundler). The server binds to 127.0.0.1, rejects other `Host`/`Origin` headers (DNS rebinding / CSRF) and
   only accepts `application/json` POSTs; preserve these guards when adding routes, and validate project paths

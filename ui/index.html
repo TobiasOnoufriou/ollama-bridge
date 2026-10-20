@@ -341,6 +341,7 @@
   button.danger-text:hover { color: var(--bad); }
   .del-dlg { width: min(520px, calc(100vw - 32px)); }
   .del-dlg .dlg-body { padding-top: 12px; }
+  #askInput { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
   .del-dlg .path { font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
   .check-line { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
   .check-line input { margin-top: 3px; }
@@ -621,6 +622,18 @@
   </div>
 </dialog>
 
+<dialog id="askDlg" class="del-dlg">
+  <form id="askForm">
+    <div class="dlg-head"><h2 id="askTitle"></h2></div>
+    <div class="dlg-body"><input id="askInput" type="text" autocomplete="off"></div>
+    <div class="add-actions">
+      <span class="grow"></span>
+      <button type="button" id="askCancel">Cancel</button>
+      <button class="primary">OK</button>
+    </div>
+  </form>
+</dialog>
+
 <div id="toast" role="status"></div>
 
 <dialog id="statusDlg">
@@ -780,6 +793,23 @@ function renderHeader() {
 }
 
 let toastTimer;
+// In-page stand-in for prompt(), which the desktop app (Electron) doesn't support. Resolves to the text or null.
+let askDone = null;
+function askText(title, value = "") {
+  const dlg = $("askDlg"), input = $("askInput");
+  $("askTitle").textContent = title;
+  input.value = value;
+  dlg.showModal();
+  input.select();
+  return new Promise((resolve) => {
+    askDone = (result) => {
+      askDone = null;
+      if (dlg.open) dlg.close();
+      resolve(result);
+    };
+  });
+}
+
 function toast(msg, isErr = false) {
   const t = $("toast");
   t.textContent = msg;
@@ -1116,7 +1146,7 @@ function selectSub(id) {
 
 async function newSub() {
   if (!state.project) return;
-  const name = prompt("Name for the new session (e.g. auth, docs):");
+  const name = await askText("Name for the new session (e.g. auth, docs):");
   if (!name?.trim()) return;
   try {
     const { sub } = await api("/api/sessions/new", { project: state.project, name });
@@ -1129,7 +1159,7 @@ async function newSub() {
 async function renameSub(id) {
   const s = state.subs.find((x) => x.id === id);
   if (!s || !id) return;
-  const name = prompt("Rename the session:", s.name);
+  const name = await askText("Rename the session:", s.name);
   if (!name?.trim() || name.trim() === s.name) return;
   try {
     await api("/api/sessions/rename", { project: state.project, sub: id, name });
@@ -1791,6 +1821,9 @@ $("issueLocal").addEventListener("click", () => startIssue("local"));
 $("issuePlan").addEventListener("click", planIssue);
 $("removeBtn").addEventListener("click", () => openDelete(state.projects.find((x) => x.project === state.project)));
 $("delCancel").addEventListener("click", () => $("delDlg").close());
+$("askCancel").addEventListener("click", () => askDone?.(null));
+$("askForm").addEventListener("submit", (e) => { e.preventDefault(); askDone?.($("askInput").value); });
+$("askDlg").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); askDone?.(null); } });
 $("delConfirm").addEventListener("click", confirmDelete);
 $("addProjectBtn").addEventListener("click", openAdd);
 $("closeAdd").addEventListener("click", () => $("addDlg").close());
