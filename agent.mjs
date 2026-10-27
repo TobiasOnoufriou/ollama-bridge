@@ -69,6 +69,12 @@ const BLOCKED_DIRS = new Set([".git", "node_modules", ".hg", ".svn", ".venv", "v
 // Resolve a model-supplied path inside the project, or throw. Follows symlinks so a link can't point outside.
 export function safePath(dir, rel) {
   if (typeof rel !== "string" || !rel.trim()) throw new Error("path is required");
+  // Models often prefix paths with the project folder's name ("myapp/src/x.js" for src/x.js), which would
+  // create a nested copy of the folder. Drop it unless the project really has a subfolder of that name.
+  const [first, ...rest] = rel.trim().split(/[\\/]+/);
+  if (rest.length && first.toLowerCase() === path.basename(dir).toLowerCase() && !fs.existsSync(path.join(dir, first))) {
+    rel = rest.join("/");
+  }
   const abs = path.resolve(dir, rel.trim());
   const inside = (p) => {
     const r = path.relative(dir, p);
@@ -230,7 +236,7 @@ export async function runAgent({ dir = projectDir(), task, files = [], model = A
   const hint = files.length ? `\n\nFiles likely involved: ${files.join(", ")}` : "";
   const messages = [
     { role: "system", content: SYSTEM },
-    { role: "user", content: `Project root: ${path.basename(dir)}\n\nTask:\n${task}${hint}` },
+    { role: "user", content: `All paths are relative to the project root, e.g. "src/app.js", not "${path.basename(dir)}/src/app.js".\n\nTask:\n${task}${hint}` },
   ];
   const started = Date.now();
   const usage = { in: 0, out: 0 };
